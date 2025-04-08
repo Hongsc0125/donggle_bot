@@ -15,10 +15,12 @@ class Settings(BaseSettings):
     
     # 디코
     DISCORD_TOKEN: str
+    APPLICATION_ID: str = None  # 선택적으로 변경하고 기본값을 None으로 설정
 
     class Config:
         env_file = 'real.env'
         env_file_encoding = 'utf-8'
+        extra = "ignore"  # 알 수 없는 추가 필드 무시
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

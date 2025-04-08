@@ -1,5 +1,5 @@
 import discord
-from discord import ui, SelectOption, Interaction, Embed, TextStyle
+from discord import ui, SelectOption, Interaction, TextStyle
 
 
 class RecruitmentModal(ui.Modal, title="모집 내용 작성"):
@@ -14,6 +14,11 @@ class RecruitmentModal(ui.Modal, title="모집 내용 작성"):
     async def on_submit(self, interaction: Interaction):
         # 모달 제출 시, 부모 RecruitmentCard의 모집 내용을 업데이트합니다.
         self.parent.recruitment_content = self.recruitment_content.value
+        
+        # 메시지 없이 상호작용 응답 처리 (defer)
+        await interaction.response.defer(ephemeral=True)
+        
+        # 임베드 업데이트
         await self.parent.update_embed(interaction)
 
 
@@ -32,9 +37,12 @@ class TypeSelectView(ui.View):
         self.parent.selected_type = selected
         self.parent.selected_kind = None
         self.parent.selected_diff = None
+        
+        # 먼저 응답을 보냅니다
+        await interaction.response.defer()
         await self.parent.update_embed(interaction)
 
-        # interaction 메시지 자체를 삭제
+        # 응답 후 메시지 삭제 시도
         try:
             await interaction.message.delete()
         except discord.errors.NotFound:
