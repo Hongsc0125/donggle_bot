@@ -3,9 +3,10 @@ from discord import ui, Embed, Color, SelectOption, Interaction
 from views.recruitment_card_views import RecruitmentModal
 import datetime
 from core.config import settings
+import asyncio
 
-# 슈퍼유저 이름 정의
-SUPER_USER = "힝트"
+# 슈퍼유저 ID 정의
+SUPER_USER_ID = "307620267067179019"
 
 class RecruitmentCard(ui.View):
     def __init__(self, dungeons, db):
@@ -17,12 +18,13 @@ class RecruitmentCard(ui.View):
         self.selected_diff = None
         self.recruitment_content = None
         self.message = None  # persistent 메시지 저장
-        self.status = None  # 모집 상태
+        self.status = "대기중"  # 초기 상태: 대기중
         self.recruitment_id = None  # DB에 저장된 모집 ID
         self.participants = []  # 참가자 목록
         self.max_participants = 4  # 기본 최대 인원 수 (본인 포함)
         self.target_channel_id = None  # 모집 공고를 게시할 채널 ID
         self.announcement_message_id = None  # 모집 공고 메시지 ID
+        self.creator_id = None  # 모집 생성자 ID
         
         # 타입 선택 메뉴 추가
         self.type_select = self._create_type_select()
@@ -42,6 +44,26 @@ class RecruitmentCard(ui.View):
         self.max_participants_select = self._create_max_participants_select()
         self.add_item(self.max_participants_select)
         
+        # 초기 버튼 설정
+        self._setup_buttons()
+        
+    def _setup_buttons(self):
+        """초기 버튼 설정"""
+        # 모든 버튼 제거
+        for item in self.children.copy():
+            if isinstance(item, ui.Button):
+                self.remove_item(item)
+        
+        # 모집 내용 작성 버튼 추가
+        content_button = ui.Button(label="모집 내용 작성", style=discord.ButtonStyle.success, custom_id="btn_content", row=4)
+        content_button.callback = self.btn_content_callback
+        self.add_item(content_button)
+        
+        # 모집 등록 버튼 추가
+        register_button = ui.Button(label="모집 등록", style=discord.ButtonStyle.primary, custom_id="btn_register", row=4)
+        register_button.callback = self.btn_register_callback
+        self.add_item(register_button)
+
     def _create_max_participants_select(self):
         options = [
             SelectOption(label=f"최대 {i}명", value=str(i)) for i in range(2, 5)
@@ -170,8 +192,8 @@ class RecruitmentCard(ui.View):
         # 참가자 목록 섹션
         if self.participants:
             participants_str = "\n".join([
-                f"> `{p['user_name']}`" 
-                for i, p in enumerate(self.participants)
+                f"> <@{p}>" 
+                for p in self.participants
             ])
             embed.add_field(
                 name="\n🎯 참가자 목록\n",
@@ -260,384 +282,328 @@ class RecruitmentCard(ui.View):
         await interaction.response.defer()
         await self.update_embed(interaction)
     
-    @ui.button(label="모집 내용 작성", style=discord.ButtonStyle.success, custom_id="btn_content", row=4)
-    async def btn_content(self, interaction: discord.Interaction, button: discord.ui.Button):
+    def update_buttons(self, interaction: discord.Interaction = None):
+        """버튼 상태를 업데이트합니다."""
+        # 모든 버튼 제거
+        for item in self.children.copy():
+            if isinstance(item, ui.Button):
+                self.remove_item(item)
+        
+        if self.status == "대기중":
+            # 모집 등록 상태일 때
+            content_button = ui.Button(label="모집 내용 작성", style=discord.ButtonStyle.success, custom_id="btn_content", row=4)
+            content_button.callback = self.btn_content_callback
+            self.add_item(content_button)
+            
+            register_button = ui.Button(label="모집 등록", style=discord.ButtonStyle.primary, custom_id="btn_register", row=4)
+            register_button.callback = self.btn_register_callback
+            self.add_item(register_button)
+        else:
+            # 등록된 모집 공고일 때
+            join_button = ui.Button(label="참가하기", style=discord.ButtonStyle.success, custom_id="btn_join", row=4)
+            join_button.callback = self.btn_join_callback
+            self.add_item(join_button)
+            
+            cancel_button = ui.Button(label="신청 취소", style=discord.ButtonStyle.danger, custom_id="btn_cancel", row=4)
+            cancel_button.callback = self.btn_cancel_callback
+            self.add_item(cancel_button)
+            
+            # 모집 생성자에게만 모집 취소 버튼 표시
+            if interaction and interaction.user.id == self.creator_id:
+                delete_button = ui.Button(label="모집 취소", style=discord.ButtonStyle.danger, custom_id="btn_delete", row=4)
+                delete_button.callback = self.btn_delete_callback
+                self.add_item(delete_button)
+
+    async def btn_content_callback(self, interaction: discord.Interaction):
+        """모집 내용 작성 버튼 콜백"""
         modal = RecruitmentModal()
-        modal.parent = self  # 모달이 이 RecruitmentCard 상태를 업데이트할 수 있도록 참조 전달
+        modal.parent = self
         await interaction.response.send_modal(modal)
-    
-    @ui.button(label="모집 등록", style=discord.ButtonStyle.primary, custom_id="btn_register", row=4)
-    async def btn_register(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 필수 정보가 모두 입력되었는지 확인
-        if not self.selected_type or not self.selected_kind or not self.selected_diff or not self.recruitment_content:
-            await interaction.response.send_message("모든 정보를 입력해주세요!", ephemeral=True)
-            return
-        
-        # 이미 등록된 모집인지 확인
-        if self.recruitment_id:
-            await interaction.response.send_message("이미 등록된 모집입니다!", ephemeral=True)
-            return
-            
-        # 등록 완료 메시지 표시 (모든 사용자에게 보이도록)
-        await interaction.response.send_message(f"모집이 등록되었습니다!\n{self.selected_type} {self.selected_kind} ({self.selected_diff}) - {self.max_participants}명\n\n**새로운 모집등록은 5초뒤 가능합니다**")
-            
-        # 현재 시간을 config에서 가져오기
-        now = datetime.datetime.fromisoformat(settings.CURRENT_DATETIME)
-        
-        # 초기 참가자로 모집 작성자 추가
-        self.participants = [{
-            "user_id": str(interaction.user.id),
-            "user_name": interaction.user.display_name,
-            "joined_at": now
-        }]
-        
-        # DB에 저장할 모집 정보 생성
-        recruitment_data = {
-            "guild_id": str(interaction.guild.id),
-            "channel_id": str(interaction.channel.id),
-            "message_id": str(self.message.id),
-            "author_id": str(interaction.user.id),
-            "author_name": interaction.user.display_name,
-            "dungeon_type": self.selected_type,
-            "dungeon_name": self.selected_kind,
-            "dungeon_difficulty": self.selected_diff,
-            "content": self.recruitment_content,
-            "status": "대기중",  # 초기 상태: 대기중
-            "created_at": now,
-            "updated_at": now,
-            "participants": self.participants,
-            "max_participants": self.max_participants
-        }
-        
-        # DB에 모집 정보 저장
-        result = await self.db["recruitments"].insert_one(recruitment_data)
-        
-        # 상태 업데이트
-        self.status = "대기중"
-        self.recruitment_id = result.inserted_id  # 추후 참조를 위해 ID 저장
-        
-        # 등록 후 UI 업데이트: 선택 메뉴 비활성화
-        # 선택 메뉴 값 표시 및 비활성화
-        # 타입 선택 메뉴 업데이트
-        self.type_select.placeholder = f"🏰 {self.selected_type}"
-        self.type_select.disabled = True
-        
-        # 종류 선택 메뉴 업데이트
-        self.kind_select.placeholder = f"⚔️ {self.selected_kind}"
-        self.kind_select.disabled = True
-        
-        # 난이도 선택 메뉴 업데이트
-        self.diff_select.placeholder = f"⭐ {self.selected_diff}"
-        self.diff_select.disabled = True
-        
-        # 인원 설정 메뉴 업데이트
-        self.max_participants_select.placeholder = f"최대 {self.max_participants}명"
-        self.max_participants_select.disabled = True
-        
-        # 등록 버튼 비활성화
-        button.disabled = True
-        
-        # 모집 정보 임베드 업데이트
-        embed = self.get_embed()
-        await self.message.edit(embed=embed, view=self)
-        
-        # 모집 공고 채널에 공고 게시
+
+    async def btn_register_callback(self, interaction: discord.Interaction):
+        """모집 등록 버튼 클릭 시 호출되는 콜백"""
         try:
-            # cogs에서 PartyCog 가져오기
-            party_cog = interaction.client.get_cog("PartyCog")
-            if party_cog:
-                # 모집 공고 채널에 공고 게시
-                await party_cog.post_recruitment_announcement(
-                    interaction.guild.id,
-                    recruitment_data,
-                    self
-                )
-                
-                # 5초 동안 모집 등록 중지 상태 설정
-                party_cog.registration_locked = True
-                
-                # 5초 후 등록 채널 초기화 (비동기 타이머)
-                import asyncio
-                
-                async def delayed_cleanup():
-                    await asyncio.sleep(5)  # 5초 대기
-                    
-                    if party_cog.registration_channel_id:
-                        try:
-                            # 등록 제한 해제
-                            party_cog.registration_locked = False
-                            
-                            reg_channel = interaction.guild.get_channel(int(party_cog.registration_channel_id))
-                            if reg_channel:
-                                # 채널의 메시지 삭제 (최근 10개)
-                                await reg_channel.purge(limit=10)
-                                # 새 등록 양식 생성
-                                await party_cog.create_registration_form(reg_channel)
-                        except Exception as e:
-                            print(f"등록 채널 초기화 중 오류 발생: {e}")
-                            # 오류가 발생해도 잠금 해제
-                            party_cog.registration_locked = False
-                
-                # 비동기 타이머 시작
-                asyncio.create_task(delayed_cleanup())
-                        
-        except Exception as e:
-            print(f"모집 공고 게시 중 오류 발생: {e}")
-            # 오류가 발생해도 5초 후 채널 초기화 시도
-            import asyncio
-            
-            async def delayed_cleanup_fallback():
-                await asyncio.sleep(5)  # 5초 대기
-                
-                try:
-                    party_cog = interaction.client.get_cog("PartyCog")
-                    if party_cog:
-                        # 등록 제한 해제
-                        party_cog.registration_locked = False
-                        
-                        if party_cog.registration_channel_id:
-                            reg_channel = interaction.guild.get_channel(int(party_cog.registration_channel_id))
-                            if reg_channel:
-                                await reg_channel.purge(limit=10)
-                                await party_cog.create_registration_form(reg_channel)
-                except Exception as e2:
-                    print(f"등록 채널 초기화 중 오류 발생: {e2}")
-                    # 오류가 발생해도 잠금 해제
-                    if party_cog:
-                        party_cog.registration_locked = False
-            
-            # 비동기 타이머 시작
-            asyncio.create_task(delayed_cleanup_fallback())
-    
-    async def btn_join_callback(self, interaction: discord.Interaction):
-        # 등록된 모집이 없으면 참가 불가
-        if not self.recruitment_id:
-            await interaction.response.send_message("등록된 모집이 없습니다!", ephemeral=True)
-            return
-            
-        # 인원 초과 여부 확인
-        if len(self.participants) >= self.max_participants:
-            await interaction.response.send_message("모집 인원이 다 찼습니다!", ephemeral=True)
-            return
-        
-        # 슈퍼유저 체크
-        is_super = self.is_super_user(interaction.user)
-        
-        # 이미 참가한 사용자인지 확인 (슈퍼유저는 중복 참가 가능)
-        user_id = str(interaction.user.id)
-        if not is_super and any(p["user_id"] == user_id for p in self.participants):
-            await interaction.response.send_message("이미 참가한 모집입니다!", ephemeral=True)
-            return
-        
-        # 응답 처리 (defer)
-        await interaction.response.defer(ephemeral=True)
-            
-        # 현재 시간을 config에서 가져오기
-        now = datetime.datetime.fromisoformat(settings.CURRENT_DATETIME)
-        
-        # 참가자 정보 생성
-        participant = {
-            "user_id": user_id,
-            "user_name": interaction.user.display_name,
-            "joined_at": now
-        }
-        
-        # 슈퍼유저 중복 참가 처리
-        if is_super and any(p["user_id"] == user_id for p in self.participants):
-            # 이름에 번호 추가하여 중복 참가 표시
-            count = sum(1 for p in self.participants if p["user_id"] == user_id)
-            participant["user_name"] += f" ({count+1})"
-        
-        # DB에서 최신 상태 확인
-        recruitment = await self.db["recruitments"].find_one({"_id": self.recruitment_id})
-        if not recruitment:
-            await interaction.followup.send("모집 정보를 찾을 수 없습니다.", ephemeral=True)
-            return
-            
-        # 모집이 이미 완료되었는지 확인
-        if recruitment["status"] == "모집 완료":
-            await interaction.followup.send("이미 모집이 완료되었습니다.", ephemeral=True)
-            return
-            
-        # 현재 참가자 수 확인
-        current_participants = len(recruitment["participants"])
-        if current_participants >= recruitment["max_participants"]:
-            await interaction.followup.send("모집 인원이 다 찼습니다!", ephemeral=True)
-            return
-            
-        # DB 업데이트 (원자적 연산 사용)
-        result = await self.db["recruitments"].update_one(
-            {
-                "_id": self.recruitment_id,
-                "status": "대기중",
-                "participants": {"$size": current_participants}
-            },
-            {
-                "$push": {"participants": participant},
-                "$set": {"updated_at": now}
-            }
-        )
-        
-        # 업데이트 실패 시 (다른 사용자가 먼저 참가한 경우)
-        if result.modified_count == 0:
-            await interaction.followup.send("다른 사용자가 먼저 참가했습니다. 다시 시도해주세요.", ephemeral=True)
-            return
-        
-        # 참가자 목록에 추가
-        self.participants.append(participant)
-        
-        # 임베드 업데이트
-        embed = self.get_embed()
-        await self.message.edit(embed=embed, view=self)
-        
-        # 공고 메시지도 업데이트
-        if self.announcement_message_id and self.target_channel_id:
-            try:
-                channel = interaction.guild.get_channel(int(self.target_channel_id))
-                announcement_message = await channel.fetch_message(int(self.announcement_message_id))
-                await announcement_message.edit(embed=embed, view=self)
-            except:
-                pass
-        
-        # 인원이 다 찼으면 스레드 생성
-        if len(self.participants) >= self.max_participants:
-            # DB에서 다시 한 번 상태 확인
-            recruitment = await self.db["recruitments"].find_one({"_id": self.recruitment_id})
-            if recruitment["status"] == "모집 완료":
-                return
-                
-            # 상태 업데이트 (원자적 연산 사용)
-            result = await self.db["recruitments"].update_one(
-                {
-                    "_id": self.recruitment_id,
-                    "status": "대기중"
-                },
-                {
-                    "$set": {
-                        "status": "모집 완료",
-                        "updated_at": now
-                    }
-                }
-            )
-            
-            # 업데이트 실패 시 (다른 사용자가 먼저 상태를 변경한 경우)
-            if result.modified_count == 0:
+            # 필수 정보 확인
+            if not all([self.selected_type, self.selected_kind, self.selected_diff, self.recruitment_content, self.max_participants]):
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("모든 필수 정보를 입력해주세요.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
                 return
             
-            # 상태 업데이트
-            self.status = "모집 완료"
+            # 모집 ID 생성 (현재 시간 기반)
+            self.recruitment_id = str(int(datetime.datetime.now().timestamp()))
+            
+            # 모집 상태 변경
+            self.status = "모집중"
+            self.creator_id = str(interaction.user.id)
+            
+            # 생성자를 참가자 목록에 추가
+            self.participants = [self.creator_id]
+            
+            # 버튼 업데이트
+            self.update_buttons()
             
             # 임베드 업데이트
             embed = self.get_embed()
-            await self.message.edit(embed=embed, view=self)
+            await interaction.message.edit(embed=embed, view=self)
             
-            # 공고 메시지도 업데이트
-            if self.announcement_message_id and self.target_channel_id:
-                try:
-                    channel = interaction.guild.get_channel(int(self.target_channel_id))
-                    announcement_message = await channel.fetch_message(int(self.announcement_message_id))
-                    await announcement_message.edit(embed=embed, view=self)
-                except:
-                    pass
+            # 등록 완료 메시지 (알림 없음)
+            await interaction.response.defer(ephemeral=True)
+            msg = await interaction.followup.send("모집이 등록되었습니다.", ephemeral=True)
+            await asyncio.sleep(2)
+            await msg.delete()
             
-            # 비공개 스레드 생성
-            await self.create_private_thread(interaction)
-    
-    @ui.button(label="신청 취소", style=discord.ButtonStyle.danger, custom_id="btn_cancel", row=4)
-    async def btn_cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 등록된 모집이 없으면 취소 불가
-        if not self.recruitment_id:
-            await interaction.response.send_message("등록된 모집이 없습니다!", ephemeral=True)
-            return
-            
-        # 모집 완료 상태면 취소 불가
-        if self.status == "모집 완료":
-            await interaction.response.send_message("모집이 완료되어 취소할 수 없습니다!", ephemeral=True)
-            return
-            
-        # 응답 처리 (defer)
-        await interaction.response.defer(ephemeral=True)
-            
-        # 현재 시간을 config에서 가져오기
-        now = datetime.datetime.fromisoformat(settings.CURRENT_DATETIME)
-        
-        # DB에서 최신 상태 확인
-        recruitment = await self.db["recruitments"].find_one({"_id": self.recruitment_id})
-        if not recruitment:
-            await interaction.followup.send("모집 정보를 찾을 수 없습니다.", ephemeral=True)
-            return
-            
-        # 모집이 이미 완료되었는지 확인
-        if recruitment["status"] == "모집 완료":
-            await interaction.followup.send("이미 모집이 완료되었습니다.", ephemeral=True)
-            return
-            
-        # 참가자 목록에서 사용자 찾기
-        user_id = str(interaction.user.id)
-        participant_index = next((i for i, p in enumerate(recruitment["participants"]) if p["user_id"] == user_id), None)
-        if participant_index is None:
-            await interaction.followup.send("참가하지 않은 모집입니다!", ephemeral=True)
-            return
-            
-        # DB 업데이트 (원자적 연산 사용)
-        result = await self.db["recruitments"].update_one(
-            {
-                "_id": self.recruitment_id,
-                "status": "대기중",
-                "participants.user_id": user_id
-            },
-            {
-                "$pull": {"participants": {"user_id": user_id}},
-                "$set": {"updated_at": now}
-            }
-        )
-        
-        # 업데이트 실패 시
-        if result.modified_count == 0:
-            await interaction.followup.send("취소할 수 없습니다. 다시 시도해주세요.", ephemeral=True)
-            return
-        
-        # 참가자 목록에서 제거
-        self.participants = [p for p in self.participants if p["user_id"] != user_id]
-        
-        # 임베드 업데이트
-        embed = self.get_embed()
-        await self.message.edit(embed=embed, view=self)
-        
-        # 공고 메시지도 업데이트
-        if self.announcement_message_id and self.target_channel_id:
+            # 등록 양식 메시지 삭제
             try:
-                channel = interaction.guild.get_channel(int(self.target_channel_id))
-                announcement_message = await channel.fetch_message(int(self.announcement_message_id))
-                await announcement_message.edit(embed=embed, view=self)
+                await interaction.message.delete()
             except:
                 pass
-    
-    async def create_private_thread(self, interaction: discord.Interaction):
-        # 스레드 생성
-        thread_name = f"{self.selected_type} {self.selected_kind} {self.selected_diff} 모집 완료"
-        try:
-            # Discord.py 버전에 따라 지원하는 방식으로 스레드 생성
-            thread = None
-            try:
-                # 최신 버전 - 초기 보관 시간은 60분으로 설정
-                thread = await self.message.create_thread(
-                    name=thread_name,
-                    auto_archive_duration=60  # 임시 기본값, 사용자가 선택할 예정
-                )
-            except TypeError:
-                # 이전 버전
-                thread = await self.message.create_thread(name=thread_name)
             
-            if not thread:
-                await interaction.followup.send("스레드 생성에 실패했습니다.", ephemeral=True)
+            # PartyCog 인스턴스 가져오기
+            party_cog = interaction.client.get_cog("PartyCog")
+            if not party_cog:
+                print("[ERROR] PartyCog를 찾을 수 없음")
                 return
             
-            # 모집자 정보
-            author = self.participants[0]  # 첫 번째 참가자가 모집자
-            author_member = interaction.guild.get_member(int(author["user_id"]))
+            # 모집 데이터 생성
+            recruitment_data = {
+                "recruitment_id": self.recruitment_id,
+                "guild_id": str(interaction.guild_id),
+                "creator_id": self.creator_id,
+                "type": self.selected_type,
+                "kind": self.selected_kind,
+                "difficulty": self.selected_diff,
+                "content": self.recruitment_content,
+                "max_participants": self.max_participants,
+                "participants": self.participants,
+                "status": self.status,
+                "created_at": datetime.datetime.now().isoformat()
+            }
             
-            # 스레드 보관 기간 선택 뷰 생성
+            # DB에 저장
+            await self.db["recruitments"].insert_one(recruitment_data)
+            
+            # 모집 공고 게시
+            announcement_message = await party_cog.post_recruitment_announcement(
+                interaction.guild_id,
+                recruitment_data,
+                self
+            )
+            
+            if announcement_message:
+                # 공고 메시지 정보 저장
+                await self.db["recruitments"].update_one(
+                    {"recruitment_id": self.recruitment_id},
+                    {
+                        "$set": {
+                            "announcement_message_id": str(announcement_message.id),
+                            "target_channel_id": str(announcement_message.channel.id)
+                        }
+                    }
+                )
+            
+            # 5초 후 새 등록 양식 생성
+            await asyncio.sleep(5)
+            await party_cog.create_registration_form(interaction.channel)
+            
+        except Exception as e:
+            print(f"[ERROR] 모집 등록 중 오류 발생: {e}")
+            import traceback
+            print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("모집 등록 중 오류가 발생했습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+
+    async def btn_delete_callback(self, interaction: discord.Interaction):
+        """모집 취소 버튼 콜백"""
+        # 모집 생성자만 취소 가능
+        if interaction.user.id != self.creator_id:
+            await interaction.response.defer(ephemeral=True)
+            msg = await interaction.followup.send("모집 생성자만 취소할 수 있습니다.", ephemeral=True)
+            await asyncio.sleep(2)
+            await msg.delete()
+            return
+        
+        # 모집 취소 처리
+        self.status = "취소됨"
+        
+        # 버튼 업데이트
+        self.update_buttons(interaction)
+        
+        # 임베드 업데이트
+        await self.update_embed(interaction)
+        
+        # 모집 취소 메시지
+        await interaction.response.defer(ephemeral=True)
+        msg = await interaction.followup.send("모집이 취소되었습니다.", ephemeral=True)
+        await asyncio.sleep(2)
+        await msg.delete()
+
+    async def btn_join_callback(self, interaction: discord.Interaction):
+        """참가하기 버튼 클릭 시 호출되는 콜백"""
+        try:
+            # 모집 정보 가져오기
+            recruitment = await self.db["recruitments"].find_one({"recruitment_id": self.recruitment_id})
+            if not recruitment:
+                print(f"[ERROR] 모집 정보를 찾을 수 없음: {self.recruitment_id}")
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("모집 정보를 찾을 수 없습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+                return
+            
+            # 사용자 ID
+            user_id = str(interaction.user.id)
+            
+            # 슈퍼유저 체크
+            is_super = self.is_super_user(interaction.user)
+            
+            # 이미 참가한 경우 (슈퍼유저는 중복 참가 가능)
+            if not is_super and user_id in self.participants:
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("이미 참가 신청하셨습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+                return
+            
+            # 최대 인원 초과 확인 (슈퍼유저도 인원 제한 적용)
+            current_participants = len(self.participants)
+            if current_participants >= self.max_participants:
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send(f"모집 인원이 마감되었습니다. (최대 {self.max_participants}명)", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+                return
+            
+            # 참가자 추가 (슈퍼유저는 중복 추가 가능)
+            if is_super or user_id not in self.participants:
+                await self.db["recruitments"].update_one(
+                    {"recruitment_id": self.recruitment_id},
+                    {"$push": {"participants": user_id}}
+                )
+                
+                # 참가자 목록 업데이트
+                self.participants.append(user_id)
+                
+                # 임베드 업데이트
+                embed = self.get_embed()
+                await interaction.message.edit(embed=embed, view=self)
+                
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("참가 신청이 완료되었습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+                
+                # 인원이 다 찼는지 확인
+                if len(self.participants) >= self.max_participants:
+                    # 모집 상태를 "모집 완료"로 변경
+                    self.status = "모집 완료"
+                    
+                    # DB 업데이트
+                    await self.db["recruitments"].update_one(
+                        {"recruitment_id": self.recruitment_id},
+                        {"$set": {"status": "모집 완료"}}
+                    )
+                    
+                    # 임베드 업데이트
+                    embed = self.get_embed()
+                    await interaction.message.edit(embed=embed, view=self)
+                    
+                    # 비밀 스레드 생성
+                    await self.create_private_thread(interaction)
+            else:
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("이미 참가 신청하셨습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+            
+        except Exception as e:
+            print(f"[ERROR] 참가 신청 중 오류 발생: {e}")
+            import traceback
+            print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("참가 신청 중 오류가 발생했습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+
+    async def btn_cancel_callback(self, interaction: discord.Interaction):
+        """신청 취소 버튼 클릭 시 호출되는 콜백"""
+        try:
+            # 모집 정보 가져오기
+            recruitment = await self.db["recruitments"].find_one({"recruitment_id": self.recruitment_id})
+            if not recruitment:
+                print(f"[ERROR] 모집 정보를 찾을 수 없음: {self.recruitment_id}")
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("모집 정보를 찾을 수 없습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+                return
+            
+            # 사용자 ID
+            user_id = str(interaction.user.id)
+            
+            # 참가 신청한 사용자인지 확인
+            if user_id not in recruitment.get("participants", []):
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("참가 신청한 내역이 없습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+                return
+            
+            # 모집 생성자는 참가 취소 불가능
+            if user_id == recruitment.get("creator_id"):
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("모집 생성자는 참가를 취소할 수 없습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+                return
+            
+            # 참가자 제거
+            await self.db["recruitments"].update_one(
+                {"recruitment_id": self.recruitment_id},
+                {"$pull": {"participants": user_id}}
+            )
+            
+            # 참가자 목록 업데이트
+            self.participants.remove(user_id)
+            
+            # 임베드 업데이트
+            embed = self.get_embed()
+            await interaction.message.edit(embed=embed, view=self)
+            
+            await interaction.response.defer(ephemeral=True)
+            msg = await interaction.followup.send("참가 신청이 취소되었습니다.", ephemeral=True)
+            await asyncio.sleep(2)
+            await msg.delete()
+            
+        except Exception as e:
+            print(f"[ERROR] 참가 취소 중 오류 발생: {e}")
+            import traceback
+            print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("참가 취소 중 오류가 발생했습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+
+    async def create_private_thread(self, interaction: discord.Interaction):
+        """모집 완료 시 비밀 스레드를 생성합니다."""
+        try:
+            # 스레드 이름 생성
+            thread_name = f"{self.selected_type} {self.selected_kind} {self.selected_diff} 모집 완료"
+            
+            # 스레드 생성
+            thread = await interaction.message.create_thread(
+                name=thread_name,
+                auto_archive_duration=60  # 1시간 후 자동 보관
+            )
+            
+            # 모집자 멘션과 함께 보관 기간 선택 메시지 전송
+            author = self.participants[0]  # 첫 번째 참가자가 모집자
             archive_view = ThreadArchiveView(
                 self.db, 
                 self.recruitment_id, 
@@ -650,34 +616,35 @@ class RecruitmentCard(ui.View):
                 str(interaction.guild_id)
             )
             
-            # 스레드에 모집자 멘션과 함께 보관 기간 선택 메시지 전송
             await thread.send(
-                f"<@{author['user_id']}>\n"
+                f"<@{author}>\n"
                 f"## 스레드 보관 기간을 선택해주세요\n"
                 f"아래 버튼에서 스레드 유지 기간을 선택하면\n"
                 f"다른 참가자들이 초대되고 채팅이 시작됩니다.",
                 view=archive_view
             )
             
-            # DB 업데이트: 스레드 정보 저장
-            now = datetime.datetime.fromisoformat(settings.CURRENT_DATETIME)
+            # DB에 스레드 정보 저장
             await self.db["recruitments"].update_one(
-                {"_id": self.recruitment_id},
+                {"recruitment_id": self.recruitment_id},
                 {
                     "$set": {
                         "thread_id": str(thread.id),
-                        "thread_created_at": now,
-                        "updated_at": now
+                        "thread_created_at": datetime.datetime.now().isoformat()
                     }
                 }
             )
+            
         except Exception as e:
-            print(f"스레드 생성 중 오류 발생: {e}")
-            await interaction.followup.send(f"스레드 생성 중 오류가 발생했습니다: {e}", ephemeral=True)
+            print(f"[ERROR] 스레드 생성 중 오류 발생: {e}")
+            import traceback
+            print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
+            await interaction.followup.send("스레드 생성 중 오류가 발생했습니다.", ephemeral=True)
 
     # 슈퍼유저 체크 함수
     def is_super_user(self, user):
-        return user.display_name == SUPER_USER or user.name == SUPER_USER
+        """사용자가 슈퍼유저인지 확인"""
+        return str(user.id) == SUPER_USER_ID
 
 # 스레드 보관 기간 선택을 위한 뷰 클래스
 class ThreadArchiveView(ui.View):
@@ -709,7 +676,10 @@ class ThreadArchiveView(ui.View):
     async def btn_archive_1hour(self, interaction: discord.Interaction, button: discord.ui.Button):
         # 슈퍼유저 체크
         if interaction.user.name != "힝트" and interaction.user.display_name != "힝트":
-            await interaction.response.send_message("이 버튼은 슈퍼유저만 사용할 수 있습니다.", ephemeral=True)
+            await interaction.response.defer(ephemeral=True)
+            msg = await interaction.followup.send("이 버튼은 슈퍼유저만 사용할 수 있습니다.", ephemeral=True)
+            await asyncio.sleep(2)
+            await msg.delete()
             return
         await self.set_archive_duration(interaction, 60)  # 1시간
     
@@ -719,8 +689,11 @@ class ThreadArchiveView(ui.View):
             
             # 모집자만 버튼을 누를 수 있도록 체크
             author = self.participants[0]  # 첫 번째 참가자가 모집자
-            if str(interaction.user.id) != author["user_id"]:
-                await interaction.response.send_message("모집자만 스레드 보관 기간을 설정할 수 있습니다.", ephemeral=True)
+            if str(interaction.user.id) != author:
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("모집자만 스레드 보관 기간을 설정할 수 있습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
                 return
             
             # 스레드 보관 기간 설정
@@ -728,10 +701,16 @@ class ThreadArchiveView(ui.View):
             
             # 응답 메시지
             if duration_minutes == 60:
-                await interaction.response.send_message("스레드 보관 기간이 1시간으로 설정되었습니다. (테스트용)")
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("스레드 보관 기간이 1시간으로 설정되었습니다. (테스트용)")
+                await asyncio.sleep(2)
+                await msg.delete()
             else:
                 days = duration_minutes // 1440
-                await interaction.response.send_message(f"스레드 보관 기간이 {days}일로 설정되었습니다.")
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send(f"스레드 보관 기간이 {days}일로 설정되었습니다.")
+                await asyncio.sleep(2)
+                await msg.delete()
             
             # 버튼 비활성화
             for child in self.children:
@@ -741,9 +720,9 @@ class ThreadArchiveView(ui.View):
             await interaction.message.edit(view=self)
             
             # DB 업데이트: 스레드 보관 기간 저장
-            now = datetime.datetime.fromisoformat(settings.CURRENT_DATETIME)
+            now = datetime.datetime.now().isoformat()
             await self.db["recruitments"].update_one(
-                {"_id": self.recruitment_id},
+                {"recruitment_id": self.recruitment_id},
                 {
                     "$set": {
                         "thread_archive_duration": duration_minutes,
@@ -755,7 +734,7 @@ class ThreadArchiveView(ui.View):
             # 나머지 참가자들을 스레드에 초대하는 메시지 전송
             other_participants = self.participants[1:]  # 모집자 제외
             if other_participants:
-                mentions = " ".join([f"<@{p['user_id']}>" for p in other_participants])
+                mentions = " ".join([f"<@{p}>" for p in other_participants])
                 thread_name = f"{self.dungeon_type} {self.dungeon_kind} {self.dungeon_diff}"
                 content = (
                     f"# {thread_name} 모집 완료\n"
@@ -763,11 +742,17 @@ class ThreadArchiveView(ui.View):
                     f"**던전**: {self.dungeon_type} - {self.dungeon_kind} ({self.dungeon_diff})\n"
                     f"**모집 내용**: {self.recruitment_content}\n\n"
                     f"**참가자 명단**:\n" + 
-                    "\n".join([f"{i+1}. {p['user_name']}" for i, p in enumerate(self.participants)])
+                    "\n".join([f"{i+1}. <@{p}>" for i, p in enumerate(self.participants)])
                 )
                 
                 await thread.send(f"{mentions}\n\n{content}")
             
         except Exception as e:
             print(f"스레드 보관 기간 설정 중 오류 발생: {e}")
-            await interaction.response.send_message(f"스레드 보관 기간 설정 중 오류가 발생했습니다: {e}", ephemeral=True)
+            import traceback
+            print(f"상세 오류: {traceback.format_exc()}")
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send(f"스레드 보관 기간 설정 중 오류가 발생했습니다: {e}", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()

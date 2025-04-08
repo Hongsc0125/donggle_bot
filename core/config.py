@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     
     # 디코
     DISCORD_TOKEN: str
-    APPLICATION_ID: str = None  # 선택적으로 변경하고 기본값을 None으로 설정
+    APPLICATION_ID: str
 
     class Config:
         env_file = 'real.env'
