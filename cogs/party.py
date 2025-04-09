@@ -55,7 +55,7 @@ HELP_DATA = {
 # 채널 설정을 위한 View 클래스 추가
 class ChannelSetupView(discord.ui.View):
     def __init__(self, cog, setup_type):
-        super().__init__(timeout=60)
+        super().__init__(timeout=None)
         self.cog = cog
         self.setup_type = setup_type  # "announcement" 또는 "registration"
         

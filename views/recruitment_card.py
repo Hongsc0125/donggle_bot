@@ -11,7 +11,7 @@ SUPER_USER_ID = "307620267067179019"
 
 class RecruitmentCard(ui.View):
     def __init__(self, dungeons, db):
-        super().__init__(timeout=300)
+        super().__init__(timeout=None)
         self.dungeons = dungeons
         self.db = db  # MongoDB 데이터베이스 객체 저장
         self.selected_type = None

@@ -1,45 +1,55 @@
 import discord
-from discord import ui, SelectOption, Interaction, TextStyle
+from discord import ui, SelectOption, Interaction, TextStyle, ModalSubmit, InputText, InputTextStyle
 import asyncio
 import datetime
 from bson.objectid import ObjectId
 
 
-class RecruitmentModal(ui.Modal, title="모집 상세내용 입력"):
-    recruitment_content = ui.TextInput(
-        label="모집 내용",
-        style=TextStyle.paragraph,
-        placeholder="모집 내용을 입력하세요...",
-        required=True,
-        max_length=500
-    )
-
-    async def on_submit(self, interaction: Interaction):
-        # 모달 제출 시, 부모 RecruitmentCard의 모집 내용을 업데이트합니다.
-        content_value = self.recruitment_content.value
-        print(f"[DEBUG] RecruitmentModal.on_submit - 입력된 모집 내용 길이: {len(content_value)}")
-        print(f"[DEBUG] RecruitmentModal.on_submit - 입력된 모집 내용 타입: {type(content_value)}")
-        print(f"[DEBUG] RecruitmentModal.on_submit - 입력된 모집 내용 미리보기: {content_value[:30]}...")
+class RecruitmentModal(ui.Modal):
+    def __init__(self):
+        super().__init__(title="모집 내용 작성", timeout=None)
         
-        # 부모 객체에 모집 내용 설정
-        self.parent.recruitment_content = content_value
-        
-        # 디버그 로그 추가
-        print(f"[DEBUG] RecruitmentModal.on_submit - 모집 내용 부모 객체에 설정 완료")
-        print(f"[DEBUG] RecruitmentModal.on_submit - 부모 recruitment_content 길이: {len(self.parent.recruitment_content)}")
-        print(f"[DEBUG] RecruitmentModal.on_submit - 부모 recruitment_content 타입: {type(self.parent.recruitment_content)}")
-        print(f"[DEBUG] RecruitmentModal.on_submit - 부모 recruitment_content 미리보기: {self.parent.recruitment_content[:30]}...")
-        
-        # 메시지 없이 상호작용 응답 처리 (defer)
-        await interaction.response.defer(ephemeral=True)
-        
-        # 임베드 업데이트 (내부에서 버튼 상태도 업데이트됨)
-        await self.parent.update_embed(interaction)
+        # 모집 내용 입력 필드
+        self.content = ui.InputText(
+            label="모집 내용",
+            style=InputTextStyle.paragraph,
+            placeholder="모집에 대한 상세 내용을 입력해주세요. (최대 500자)",
+            max_length=500,
+            min_length=1,
+            required=True
+        )
+        self.add_item(self.content)
+        self.parent = None  # 부모 뷰 참조 저장
+    
+    async def callback(self, interaction: Interaction):
+        try:
+            # 부모 뷰가 없으면 종료
+            if not self.parent:
+                await interaction.response.send_message("오류가 발생했습니다. 다시 시도해주세요.", ephemeral=True)
+                return
+                
+            # 모집 내용 저장
+            self.parent.recruitment_content = self.content.value
+            
+            # 응답 메시지 전송
+            await interaction.response.defer()
+            
+            # 부모 뷰 업데이트
+            await self.parent.update_embed(interaction)
+            
+            # 임시 메시지 (알림 없음)
+            msg = await interaction.followup.send("모집 내용이 저장되었습니다.", ephemeral=True)
+            await asyncio.sleep(2)  # 2초 후 메시지 자동 삭제
+            await msg.delete()
+            
+        except Exception as e:
+            print(f"[ERROR] 모집 내용 저장 중 오류 발생: {e}")
+            await interaction.response.send_message("모집 내용 저장 중 오류가 발생했습니다.", ephemeral=True)
 
 
 class TypeSelectView(ui.View):
     def __init__(self, parent):
-        super().__init__(timeout=60)
+        super().__init__(timeout=None)
         self.parent = parent
         types = sorted({d["type"] for d in self.parent.dungeons})
         options = [SelectOption(label=f"🏰 {t}", value=t) for t in types]
@@ -66,7 +76,7 @@ class TypeSelectView(ui.View):
 
 class KindSelectView(ui.View):
     def __init__(self, parent):
-        super().__init__(timeout=60)
+        super().__init__(timeout=None)
         self.parent = parent
         kinds = sorted({d["name"] for d in self.parent.dungeons if d["type"] == self.parent.selected_type})
         options = [SelectOption(label=f"⚔️ {k}", value=k) for k in kinds]
