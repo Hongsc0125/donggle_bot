@@ -239,8 +239,14 @@ class PartyCog(commands.Cog):
                         await self.db["view_states"].delete_one({"message_id": state["message_id"]})
                         continue
                     
+                    # 메시지의 임베드가 모집 등록 양식인지 확인
+                    if not message.embeds or not message.embeds[0].title or "파티 모집 등록 양식" in message.embeds[0].title:
+                        print(f"[DEBUG] 모집 등록 양식 메시지 건너뛰기: {message.id}")
+                        continue
+                    
                     # 뷰 복원
                     view = RecruitmentCard(self.dungeons, self.db)
+                    view.is_recreated = True  # 재활성화 표시
                     view.message = message
                     view.selected_type = state.get("selected_type")
                     view.selected_kind = state.get("selected_kind")
@@ -264,7 +270,7 @@ class PartyCog(commands.Cog):
                         print(f"[WARNING] 생성자 ID 변환 중 오류: {state.get('creator_id')}")
                         view.creator_id = 0
                     
-                    # 버튼 추가
+                    # 모든 기존 항목 제거
                     view.clear_items()
                     
                     # 참가하기 버튼 추가 (row 0)
@@ -283,8 +289,12 @@ class PartyCog(commands.Cog):
                         delete_button.callback = view.btn_delete_callback
                         view.add_item(delete_button)
                     
+                    # 임베드 생성
+                    embed = view.get_embed()
+                    embed.title = "파티 모집 공고"
+                    
                     # 뷰 업데이트
-                    await message.edit(view=view)
+                    await message.edit(embed=embed, view=view)
                     print(f"[DEBUG] 뷰 상태 복원 완료: {state['message_id']}")
                     
                 except Exception as e:
@@ -349,10 +359,6 @@ class PartyCog(commands.Cog):
                             default_thread_auto_archive_duration=10080  # 7일
                         )
                         
-                        # 기존 공고 메시지 모두 삭제
-                        await announcement_channel.purge(limit=None)
-                        print("[INFO] 공고 채널의 기존 메시지 삭제 완료")
-                        
                         # DB에서 활성 상태인 모집 정보 불러오기
                         active_recruitments = await self.db["recruitments"].find(
                             {"status": "active"}
@@ -360,45 +366,138 @@ class PartyCog(commands.Cog):
                         
                         print(f"[INFO] 활성 모집 {len(active_recruitments)}개를 불러왔습니다.")
                         
-                        # 각 모집 정보를 공고 채널에 게시
+                        # 채널의 모든 메시지 가져오기
+                        channel_messages = {}
+                        async for message in announcement_channel.history(limit=100):
+                            channel_messages[message.id] = message
+                        
+                        # 각 모집에 대해 처리
                         for recruitment in active_recruitments:
                             try:
-                                # 모집 정보로 임시 뷰 생성
-                                temp_view = RecruitmentCard(self.dungeons, self.db)
-                                temp_view.selected_type = recruitment.get("type")
-                                temp_view.selected_kind = recruitment.get("dungeon")
-                                temp_view.selected_diff = recruitment.get("difficulty")
-                                temp_view.recruitment_content = recruitment.get("description")
-                                temp_view.max_participants = recruitment.get("max_participants")
-                                temp_view.status = recruitment.get("status")
-                                temp_view.recruitment_id = str(recruitment["_id"])
+                                recruitment_id = str(recruitment["_id"])
+                                message_id = recruitment.get("announcement_message_id")
                                 
-                                # 참가자 목록 변환 (문자열 ID -> 정수 ID)
-                                participants = recruitment.get("participants", [])
-                                temp_view.participants = [int(p) for p in participants if p and p.isdigit()]
-                                
-                                # 생성자 ID 설정
-                                creator_id = recruitment.get("creator_id")
-                                if creator_id and creator_id.isdigit():
-                                    temp_view.creator_id = int(creator_id)
-                                
-                                # 모집 공고 게시
-                                await self.post_recruitment_announcement(
-                                    recruitment.get("guild_id"), 
-                                    recruitment, 
-                                    temp_view
-                                )
-                                
-                                # 잠시 대기하여 API 제한 방지
-                                await asyncio.sleep(0.5)
-                                
+                                if message_id and int(message_id) in channel_messages:
+                                    # 기존 메시지가 있으면 상호작용만 다시 등록
+                                    message = channel_messages[int(message_id)]
+                                    view = RecruitmentCard(self.dungeons, self.db)
+                                    view.is_recreated = True  # 재활성화 표시
+                                    view.message = message
+                                    view.selected_type = recruitment.get("selected_type")
+                                    view.selected_kind = recruitment.get("selected_kind")
+                                    view.selected_diff = recruitment.get("selected_diff")
+                                    view.recruitment_content = recruitment.get("recruitment_content")
+                                    view.max_participants = recruitment.get("max_participants", 4)
+                                    view.status = recruitment.get("status", "active")
+                                    view.recruitment_id = recruitment_id
+                                    
+                                    # 참가자 목록 변환 (문자열 ID -> 정수 ID)
+                                    try:
+                                        participants = recruitment.get("participants", [])
+                                        view.participants = [int(p) for p in participants]
+                                    except ValueError:
+                                        print(f"[WARNING] 참가자 ID 변환 중 오류: {participants}")
+                                        view.participants = []
+                                    
+                                    try:
+                                        view.creator_id = int(recruitment.get("creator_id", 0))
+                                    except ValueError:
+                                        print(f"[WARNING] 생성자 ID 변환 중 오류: {recruitment.get('creator_id')}")
+                                        view.creator_id = 0
+                                    
+                                    # 모든 기존 항목 제거
+                                    view.clear_items()
+                                    
+                                    # 참가하기 버튼 추가 (row 0)
+                                    join_button = discord.ui.Button(label="참가하기", style=discord.ButtonStyle.success, custom_id="btn_join", row=0)
+                                    join_button.callback = view.btn_join_callback
+                                    view.add_item(join_button)
+                                    
+                                    # 신청 취소 버튼 추가 (row 0)
+                                    cancel_button = discord.ui.Button(label="신청 취소", style=discord.ButtonStyle.danger, custom_id="btn_cancel", row=0)
+                                    cancel_button.callback = view.btn_cancel_callback
+                                    view.add_item(cancel_button)
+                                    
+                                    # 모집 생성자에게만 모집 취소 버튼 표시 (row 1)
+                                    if view.creator_id:
+                                        delete_button = discord.ui.Button(label="모집 취소", style=discord.ButtonStyle.danger, custom_id="btn_delete", row=1)
+                                        delete_button.callback = view.btn_delete_callback
+                                        view.add_item(delete_button)
+                                    
+                                    # 임베드 생성
+                                    embed = view.get_embed()
+                                    embed.title = "파티 모집 공고"
+                                    
+                                    # 뷰 업데이트
+                                    await message.edit(embed=embed, view=view)
+                                    print(f"[INFO] 모집 ID {recruitment_id}의 상호작용을 다시 등록했습니다.")
+                                else:
+                                    # 메시지가 없으면 새로 생성
+                                    view = RecruitmentCard(self.dungeons, self.db)
+                                    view.is_recreated = True  # 재활성화 표시
+                                    view.selected_type = recruitment.get("selected_type")
+                                    view.selected_kind = recruitment.get("selected_kind")
+                                    view.selected_diff = recruitment.get("selected_diff")
+                                    view.recruitment_content = recruitment.get("recruitment_content")
+                                    view.max_participants = recruitment.get("max_participants", 4)
+                                    view.status = recruitment.get("status", "active")
+                                    view.recruitment_id = recruitment_id
+                                    
+                                    # 참가자 목록 변환 (문자열 ID -> 정수 ID)
+                                    try:
+                                        participants = recruitment.get("participants", [])
+                                        view.participants = [int(p) for p in participants]
+                                    except ValueError:
+                                        print(f"[WARNING] 참가자 ID 변환 중 오류: {participants}")
+                                        view.participants = []
+                                    
+                                    try:
+                                        view.creator_id = int(recruitment.get("creator_id", 0))
+                                    except ValueError:
+                                        print(f"[WARNING] 생성자 ID 변환 중 오류: {recruitment.get('creator_id')}")
+                                        view.creator_id = 0
+                                    
+                                    # 모든 기존 항목 제거
+                                    view.clear_items()
+                                    
+                                    # 참가하기 버튼 추가 (row 0)
+                                    join_button = discord.ui.Button(label="참가하기", style=discord.ButtonStyle.success, custom_id="btn_join", row=0)
+                                    join_button.callback = view.btn_join_callback
+                                    view.add_item(join_button)
+                                    
+                                    # 신청 취소 버튼 추가 (row 0)
+                                    cancel_button = discord.ui.Button(label="신청 취소", style=discord.ButtonStyle.danger, custom_id="btn_cancel", row=0)
+                                    cancel_button.callback = view.btn_cancel_callback
+                                    view.add_item(cancel_button)
+                                    
+                                    # 모집 생성자에게만 모집 취소 버튼 표시 (row 1)
+                                    if view.creator_id:
+                                        delete_button = discord.ui.Button(label="모집 취소", style=discord.ButtonStyle.danger, custom_id="btn_delete", row=1)
+                                        delete_button.callback = view.btn_delete_callback
+                                        view.add_item(delete_button)
+                                    
+                                    # 임베드 생성
+                                    embed = view.get_embed()
+                                    embed.title = "파티 모집 공고"
+                                    
+                                    # 메시지 생성
+                                    message = await announcement_channel.send(embed=embed, view=view)
+                                    view.message = message
+                                    
+                                    # 메시지 ID 업데이트
+                                    await self.db["recruitments"].update_one(
+                                        {"_id": recruitment["_id"]},
+                                        {"$set": {"announcement_message_id": str(message.id)}}
+                                    )
+                                    print(f"[INFO] 모집 ID {recruitment_id}의 메시지를 새로 생성했습니다.")
+                                    
                             except Exception as e:
-                                print(f"[ERROR] 모집 공고 게시 중 오류 발생: {e}")
+                                print(f"[ERROR] 모집 공고 처리 중 오류 발생: {e}")
                                 import traceback
                                 print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
                                 continue
                         
-                        print(f"[INFO] 공고 채널 초기화 완료: {len(active_recruitments)}개 모집 공고 게시됨")
+                        print(f"[INFO] 공고 채널 초기화 완료: {len(active_recruitments)}개 모집 공고 처리됨")
                     except discord.Forbidden:
                         print(f"[ERROR] 공고 채널 초기화 권한 부족: {self.announcement_channel_id}")
                     except Exception as e:
