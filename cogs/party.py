@@ -847,26 +847,12 @@ class PartyCog(commands.Cog):
             print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
             if not interaction.response.is_done():
                 await interaction.response.send_message("도움말을 표시하는 중 오류가 발생했습니다.", ephemeral=True)
-    
-    # 오류 핸들러 추가
-    @set_announcement_channel.error
-    @set_registration_channel.error
-    @reset_registration_channel.error
-    @dongle_help.error
-    async def command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
-        """명령어 오류 처리"""
-        if isinstance(error, app_commands.errors.MissingPermissions):
-            await interaction.response.send_message("이 명령어는 관리자만 사용할 수 있습니다.", ephemeral=True)
-        else:
-            print(f"[ERROR] 명령어 실행 중 오류 발생: {error}")
-            import traceback
-            print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
-            if not interaction.response.is_done():
-                await interaction.response.send_message("명령어 실행 중 오류가 발생했습니다.", ephemeral=True)
 
     def cog_unload(self):
-        """코그가 언로드될 때 실행되는 메서드"""
-        self.cleanup_channel.cancel()  # 채널 정리 작업 중지
+        """Cog가 언로드될 때 정리 작업 수행"""
+        # 작업 취소
+        self.cleanup_channel.cancel()
+        print("[INFO] Party cog unloaded")
 
     @tasks.loop(minutes=1)  # 1분마다 실행
     async def cleanup_channel(self):
@@ -1252,6 +1238,21 @@ class PartyCog(commands.Cog):
                 msg = await interaction.followup.send("모집 등록 채널 초기화 중 오류가 발생했습니다.", ephemeral=True)
                 await asyncio.sleep(2)
                 await msg.delete()
+
+    @set_announcement_channel.error
+    @set_registration_channel.error
+    @reset_registration_channel.error
+    @dongle_help.error
+    async def command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        """명령어 오류 처리"""
+        if isinstance(error, app_commands.errors.MissingPermissions):
+            await interaction.response.send_message("이 명령어는 관리자만 사용할 수 있습니다.", ephemeral=True)
+        else:
+            print(f"[ERROR] 명령어 실행 중 오류 발생: {error}")
+            import traceback
+            print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message("명령어 실행 중 오류가 발생했습니다.", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(PartyCog(bot))
