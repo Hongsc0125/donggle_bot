@@ -1,0 +1,93 @@
+name: Discord Bot Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+
+      - name: Create requirements.txt
+        run: |
+          cat <<EOF > requirements.txt
+          discord.py==2.5.2
+          motor==3.7.0
+          pymongo==4.11.3
+          pydantic==2.11.2
+          pydantic-settings==2.8.1
+          python-dotenv==1.1.0
+          pytz==2025.2
+          EOF
+
+      - name: Configure SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+      - name: Add remote host to known_hosts
+        run: |
+          ssh-keyscan -p ${{ secrets.REMOTE_PORT }} ${{ secrets.REMOTE_HOST }} >> ~/.ssh/known_hosts
+          
+      - name: Create real.env file
+        run: |
+          cat <<EOF > real.env
+          ${{ secrets.REAL }}
+          EOF
+
+      - name: Copy project files to remote server
+        run: |
+          scp -P ${{ secrets.REMOTE_PORT }} \
+              -i ~/.ssh/id_rsa \
+              -o StrictHostKeyChecking=no \
+              -r ./bot.py ./cogs ./commands ./core ./database ./models ./services ./views ./requirements.txt \
+              ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }}:${{ secrets.REMOTE_TARGET }}
+
+      - name: Copy env file to remote server
+        run: |
+          scp -P ${{ secrets.REMOTE_PORT }} \
+              -i ~/.ssh/id_rsa \
+              -o StrictHostKeyChecking=no \
+              real.env \
+              ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }}:${{ secrets.REMOTE_TARGET }}
+
+      - name: Restart Discord Bot
+        run: |
+          ssh -p ${{ secrets.REMOTE_PORT }} \
+              -i ~/.ssh/id_rsa \
+              -o StrictHostKeyChecking=no \
+              ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} << 'EOSSH'
+                echo ">>> Stopping existing bot process..."
+                pkill -f "python bot.py" || echo "No bot process found"
+                
+                cd ${{ secrets.REMOTE_TARGET }}
+                
+                echo ">>> Setting up Python virtual environment..."
+                if [ ! -d ".venv" ]; then
+                  python -m venv .venv
+                fi
+                source .venv/bin/activate
+
+                echo ">>> Installing requirements..."
+                python -m pip install -r requirements.txt
+
+                echo ">>> Starting Discord bot in background..."
+                nohup python bot.py > bot.log 2>&1 &
+                echo ">>> Done. Discord bot is running in background."
+                
+                # Check if bot is running
+                sleep 5
+                if pgrep -f "python bot.py" > /dev/null; then
+                  echo ">>> Bot successfully started!"
+                else
+                  echo ">>> Failed to start bot. Check log files."
+                  exit 1
+                fi
+          EOSSH 

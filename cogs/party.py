@@ -301,7 +301,7 @@ class PartyCog(commands.Cog):
             print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
             
     async def initialize_channels(self):
-        """봇이 준비된 후 채널들을 초기화합니다."""
+        """채널을 초기화합니다."""
         try:
             print("[INFO] 채널 초기화 시작")
             
@@ -310,9 +310,9 @@ class PartyCog(commands.Cog):
                 self.registration_channel_id = await self._load_channel_id("registration")
                 self.announcement_channel_id = await self._load_channel_id("announcement")
             
-            # 등록 채널 초기화
+            # 모집 등록 채널 초기화
             if self.registration_channel_id:
-                print(f"[INFO] 등록 채널 초기화 중: {self.registration_channel_id}")
+                print(f"[INFO] 모집 등록 채널 초기화 중: {self.registration_channel_id}")
                 registration_channel = self.bot.get_channel(int(self.registration_channel_id))
                 if registration_channel:
                     try:
@@ -327,15 +327,15 @@ class PartyCog(commands.Cog):
                         
                         # 새 등록 양식 생성
                         await self.create_registration_form(registration_channel)
-                        print("[INFO] 등록 채널 초기화 완료")
+                        print("[INFO] 모집 등록 채널 초기화 완료")
                     except discord.Forbidden:
-                        print(f"[ERROR] 등록 채널 초기화 권한 부족: {self.registration_channel_id}")
+                        print(f"[ERROR] 모집 등록 채널 초기화 권한 부족: {self.registration_channel_id}")
                     except Exception as e:
-                        print(f"[ERROR] 등록 채널 초기화 중 오류 발생: {e}")
+                        print(f"[ERROR] 모집 등록 채널 초기화 중 오류 발생: {e}")
                         import traceback
                         print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
                 else:
-                    print(f"[ERROR] 등록 채널을 찾을 수 없음: {self.registration_channel_id}")
+                    print(f"[ERROR] 모집 등록 채널을 찾을 수 없음: {self.registration_channel_id}")
             
             # 공고 채널 초기화
             if self.announcement_channel_id:
@@ -348,7 +348,57 @@ class PartyCog(commands.Cog):
                             default_auto_archive_duration=10080,  # 7일
                             default_thread_auto_archive_duration=10080  # 7일
                         )
-                        print("[INFO] 공고 채널 초기화 완료")
+                        
+                        # 기존 공고 메시지 모두 삭제
+                        await announcement_channel.purge(limit=None)
+                        print("[INFO] 공고 채널의 기존 메시지 삭제 완료")
+                        
+                        # DB에서 활성 상태인 모집 정보 불러오기
+                        active_recruitments = await self.db["recruitments"].find(
+                            {"status": "active"}
+                        ).sort("created_at", -1).to_list(length=None)
+                        
+                        print(f"[INFO] 활성 모집 {len(active_recruitments)}개를 불러왔습니다.")
+                        
+                        # 각 모집 정보를 공고 채널에 게시
+                        for recruitment in active_recruitments:
+                            try:
+                                # 모집 정보로 임시 뷰 생성
+                                temp_view = RecruitmentCard(self.dungeons, self.db)
+                                temp_view.selected_type = recruitment.get("type")
+                                temp_view.selected_kind = recruitment.get("dungeon")
+                                temp_view.selected_diff = recruitment.get("difficulty")
+                                temp_view.recruitment_content = recruitment.get("description")
+                                temp_view.max_participants = recruitment.get("max_participants")
+                                temp_view.status = recruitment.get("status")
+                                temp_view.recruitment_id = str(recruitment["_id"])
+                                
+                                # 참가자 목록 변환 (문자열 ID -> 정수 ID)
+                                participants = recruitment.get("participants", [])
+                                temp_view.participants = [int(p) for p in participants if p and p.isdigit()]
+                                
+                                # 생성자 ID 설정
+                                creator_id = recruitment.get("creator_id")
+                                if creator_id and creator_id.isdigit():
+                                    temp_view.creator_id = int(creator_id)
+                                
+                                # 모집 공고 게시
+                                await self.post_recruitment_announcement(
+                                    recruitment.get("guild_id"), 
+                                    recruitment, 
+                                    temp_view
+                                )
+                                
+                                # 잠시 대기하여 API 제한 방지
+                                await asyncio.sleep(0.5)
+                                
+                            except Exception as e:
+                                print(f"[ERROR] 모집 공고 게시 중 오류 발생: {e}")
+                                import traceback
+                                print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
+                                continue
+                        
+                        print(f"[INFO] 공고 채널 초기화 완료: {len(active_recruitments)}개 모집 공고 게시됨")
                     except discord.Forbidden:
                         print(f"[ERROR] 공고 채널 초기화 권한 부족: {self.announcement_channel_id}")
                     except Exception as e:

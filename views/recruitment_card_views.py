@@ -2,7 +2,7 @@ import discord
 from discord import ui, SelectOption, Interaction, TextStyle
 
 
-class RecruitmentModal(ui.Modal, title="모집 내용 작성"):
+class RecruitmentModal(ui.Modal, title="모집 상세내용 입력"):
     recruitment_content = ui.TextInput(
         label="모집 내용",
         style=TextStyle.paragraph,
@@ -13,12 +13,24 @@ class RecruitmentModal(ui.Modal, title="모집 내용 작성"):
 
     async def on_submit(self, interaction: Interaction):
         # 모달 제출 시, 부모 RecruitmentCard의 모집 내용을 업데이트합니다.
-        self.parent.recruitment_content = self.recruitment_content.value
+        content_value = self.recruitment_content.value
+        print(f"[DEBUG] RecruitmentModal.on_submit - 입력된 모집 내용 길이: {len(content_value)}")
+        print(f"[DEBUG] RecruitmentModal.on_submit - 입력된 모집 내용 타입: {type(content_value)}")
+        print(f"[DEBUG] RecruitmentModal.on_submit - 입력된 모집 내용 미리보기: {content_value[:30]}...")
+        
+        # 부모 객체에 모집 내용 설정
+        self.parent.recruitment_content = content_value
+        
+        # 디버그 로그 추가
+        print(f"[DEBUG] RecruitmentModal.on_submit - 모집 내용 부모 객체에 설정 완료")
+        print(f"[DEBUG] RecruitmentModal.on_submit - 부모 recruitment_content 길이: {len(self.parent.recruitment_content)}")
+        print(f"[DEBUG] RecruitmentModal.on_submit - 부모 recruitment_content 타입: {type(self.parent.recruitment_content)}")
+        print(f"[DEBUG] RecruitmentModal.on_submit - 부모 recruitment_content 미리보기: {self.parent.recruitment_content[:30]}...")
         
         # 메시지 없이 상호작용 응답 처리 (defer)
         await interaction.response.defer(ephemeral=True)
         
-        # 임베드 업데이트
+        # 임베드 업데이트 (내부에서 버튼 상태도 업데이트됨)
         await self.parent.update_embed(interaction)
 
 

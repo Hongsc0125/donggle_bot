@@ -22,7 +22,7 @@ class RecruitmentCard(ui.View):
         self.status = "pending"  # 초기 상태: pending
         self.recruitment_id = None  # DB에 저장된 모집 ID (MongoDB _id)
         self.participants = []  # 참가자 목록
-        self.max_participants = 4  # 기본 최대 인원 수 (본인 포함)
+        self.max_participants = None  # 기본 최대 인원 수 (본인 포함)
         self.announcement_channel_id = None  # 모집 공고를 게시할 채널 ID
         self.announcement_message_id = None  # 모집 공고 메시지 ID
         self.creator_id = None  # 모집 생성자 ID
@@ -56,13 +56,31 @@ class RecruitmentCard(ui.View):
                 self.remove_item(item)
         
         # 모집 내용 작성 버튼 추가
-        content_button = ui.Button(label="모집 내용 작성", style=discord.ButtonStyle.success, custom_id="btn_content", row=4)
+        content_button = ui.Button(label="모집 상세내용 입력", style=discord.ButtonStyle.success, custom_id="btn_content", row=4)
         content_button.callback = self.btn_content_callback
         self.add_item(content_button)
         
-        # 모집 등록 버튼 추가
+        # 모집 등록 버튼 추가 (초기에는 비활성화)
         register_button = ui.Button(label="모집 등록", style=discord.ButtonStyle.primary, custom_id="btn_register", row=4)
         register_button.callback = self.btn_register_callback
+        
+        # 각 필수값의 상태 로깅
+        has_type = bool(self.selected_type)
+        has_kind = bool(self.selected_kind)
+        has_diff = bool(self.selected_diff)
+        has_content = bool(self.recruitment_content)
+        has_max_participants = bool(self.max_participants)
+        
+        # 모든 필수 정보가 입력되었는지 확인하여 버튼 활성화 여부 결정
+        button_enabled = all([has_type, has_kind, has_diff, has_content, has_max_participants])
+        register_button.disabled = not button_enabled
+        
+        # 디버그 로그 추가
+        print(f"[DEBUG] _setup_buttons - 모집 등록 버튼 활성화 상태: {not register_button.disabled}")
+        print(f"[DEBUG] _setup_buttons - 필수값 상태 (각각): type={has_type}, kind={has_kind}, diff={has_diff}, content={has_content}, max_participants={has_max_participants}")
+        print(f"[DEBUG] _setup_buttons - 필수값 상태 (all 함수): {button_enabled}")
+        print(f"[DEBUG] _setup_buttons - 필수값 실제 값: type={self.selected_type}, kind={self.selected_kind}, diff={self.selected_diff}, content_len={len(self.recruitment_content) if self.recruitment_content else 0}, max_participants={self.max_participants}")
+        
         self.add_item(register_button)
 
     def _create_max_participants_select(self):
@@ -70,7 +88,7 @@ class RecruitmentCard(ui.View):
             SelectOption(label=f"최대 {i}명", value=str(i)) for i in range(2, 5)
         ]
         select = ui.Select(
-            placeholder="인원 설정 (기본: 4명)",
+            placeholder="인원 설정",
             options=options,
             custom_id="max_participants_select",
             row=3
@@ -235,101 +253,165 @@ class RecruitmentCard(ui.View):
             self.remove_item(item)
             
     async def update_embed(self, interaction: discord.Interaction = None):
-        # 각 선택 메뉴 상태 업데이트
-        kind_select = self._create_kind_select()
-        diff_select = self._create_diff_select()
+        # 디버그 로그 추가
+        print(f"[DEBUG] update_embed - 시작")
+        print(f"[DEBUG] update_embed - 현재 상태: type={self.selected_type}, kind={self.selected_kind}, diff={self.selected_diff}, content={bool(self.recruitment_content)}, max_participants={self.max_participants}")
         
-        # 선택된 값이 있으면 placeholder에 표시
-        if self.selected_type:
-            self.type_select.placeholder = f"🏰 {self.selected_type}"
-        
-        if self.selected_kind:
-            kind_select.placeholder = f"⚔️ {self.selected_kind}"
-        
-        if self.selected_diff:
-            diff_select.placeholder = f"⭐ {self.selected_diff}"
-            
-        # 인원 설정 메뉴 placeholder 업데이트
-        self.max_participants_select.placeholder = f"최대 {self.max_participants}명"
-        
-        # 기존 메뉴 제거 후 새 메뉴 추가
-        for item in self.children.copy():
-            if item.custom_id in ["kind_select", "diff_select"]:
+        try:
+            # 모든 UI 요소 제거
+            for item in self.children.copy():
                 self.remove_item(item)
-        
-        self.add_item(kind_select)
-        self.add_item(diff_select)
-        
-        # 임베드 업데이트
-        embed = self.get_embed()
-        await self.message.edit(embed=embed, view=self)
+            
+            # 각 선택 메뉴 상태 업데이트
+            # 타입 선택 메뉴 (row 0)
+            self.type_select = self._create_type_select()
+            # 선택된 값이 있으면 placeholder에 표시
+            if self.selected_type:
+                self.type_select.placeholder = f"🏰 {self.selected_type}"
+            self.add_item(self.type_select)
+            
+            # 종류 선택 메뉴 (row 1)
+            self.kind_select = self._create_kind_select()
+            # 선택된 값이 있으면 placeholder에 표시
+            if self.selected_kind:
+                self.kind_select.placeholder = f"⚔️ {self.selected_kind}"
+            self.add_item(self.kind_select)
+            
+            # 난이도 선택 메뉴 (row 2)
+            self.diff_select = self._create_diff_select()
+            # 선택된 값이 있으면 placeholder에 표시
+            if self.selected_diff:
+                self.diff_select.placeholder = f"⭐ {self.selected_diff}"
+            self.add_item(self.diff_select)
+            
+            # 인원 설정 메뉴 (row 3)
+            self.max_participants_select = self._create_max_participants_select()
+            # 선택된 값이 있으면 placeholder에 표시
+            if self.max_participants:
+                self.max_participants_select.placeholder = f"최대 {self.max_participants}명"
+            self.add_item(self.max_participants_select)
+            
+            # 필요한 버튼 추가 (row 4)
+            if self.status == "pending":
+                # 모집 내용 작성 버튼 추가
+                content_button = ui.Button(label="모집 내용 작성", style=discord.ButtonStyle.success, custom_id="btn_content", row=4)
+                content_button.callback = self.btn_content_callback
+                self.add_item(content_button)
+                
+                # 모집 등록 버튼 추가
+                register_button = ui.Button(label="모집 등록", style=discord.ButtonStyle.primary, custom_id="btn_register", row=4)
+                register_button.callback = self.btn_register_callback
+                
+                # 각 필수값의 상태 로깅
+                has_type = bool(self.selected_type)
+                has_kind = bool(self.selected_kind)
+                has_diff = bool(self.selected_diff)
+                has_content = bool(self.recruitment_content)
+                has_max_participants = bool(self.max_participants)
+                
+                # 모든 필수 정보가 입력되었는지 확인하여 버튼 활성화 여부 결정
+                button_enabled = all([has_type, has_kind, has_diff, has_content, has_max_participants])
+                register_button.disabled = not button_enabled
+                
+                # 디버그 로그 추가
+                print(f"[DEBUG] update_embed - 모집 등록 버튼 활성화 상태: {not register_button.disabled}")
+                print(f"[DEBUG] update_embed - 필수값 상태 (각각): type={has_type}, kind={has_kind}, diff={has_diff}, content={has_content}, max_participants={has_max_participants}")
+                print(f"[DEBUG] update_embed - 필수값 상태 (all 함수): {button_enabled}")
+                if self.recruitment_content:
+                    content_preview = self.recruitment_content[:30] + "..." if len(self.recruitment_content) > 30 else self.recruitment_content
+                    print(f"[DEBUG] update_embed - 모집 내용 미리보기: {content_preview}")
+                
+                self.add_item(register_button)
+            else:
+                # 등록된 모집 공고일 때 - 버튼들을 row 4에 배치
+                join_button = ui.Button(label="참가하기", style=discord.ButtonStyle.success, custom_id="btn_join", row=4)
+                join_button.callback = self.btn_join_callback
+                self.add_item(join_button)
+                
+                cancel_button = ui.Button(label="신청 취소", style=discord.ButtonStyle.danger, custom_id="btn_cancel", row=4)
+                cancel_button.callback = self.btn_cancel_callback
+                self.add_item(cancel_button)
+                
+                # 모집 생성자에게만 모집 취소 버튼 표시 (이 버튼은 row 4에 추가)
+                if interaction and interaction.user.id == self.creator_id:
+                    delete_button = ui.Button(label="모집 취소", style=discord.ButtonStyle.danger, custom_id="btn_delete", row=4)
+                    delete_button.callback = self.btn_delete_callback
+                    self.add_item(delete_button)
+            
+            # 임베드 업데이트
+            embed = self.get_embed()
+            
+            # 디버그 로그 추가
+            print(f"[DEBUG] update_embed - 임베드 생성 완료, 메시지 편집 시작")
+            print(f"[DEBUG] update_embed - 선택된 값들: type={self.selected_type}, kind={self.selected_kind}, diff={self.selected_diff}, max_participants={self.max_participants}")
+            print(f"[DEBUG] update_embed - 선택 메뉴 placeholder: type={self.type_select.placeholder}, kind={self.kind_select.placeholder}, diff={self.diff_select.placeholder}, max_participants={self.max_participants_select.placeholder}")
+            
+            await self.message.edit(embed=embed, view=self)
+            print(f"[DEBUG] update_embed - 완료")
+        except Exception as e:
+            print(f"[ERROR] update_embed - 메시지 편집 중 오류 발생: {e}")
+            import traceback
+            print(f"[ERROR] update_embed - 상세 오류: {traceback.format_exc()}")
     
     async def type_callback(self, interaction: Interaction):
         self.selected_type = interaction.data["values"][0]
         self.selected_kind = None
         self.selected_diff = None
+        
+        # 디버그 로그 추가
+        print(f"[DEBUG] type_callback - 던전 타입 선택됨: {self.selected_type}")
+        print(f"[DEBUG] type_callback - 종류와 난이도 초기화: kind={self.selected_kind}, diff={self.selected_diff}")
+        
         await interaction.response.defer()
         await self.update_embed(interaction)
     
     async def kind_callback(self, interaction: Interaction):
         self.selected_kind = interaction.data["values"][0]
         self.selected_diff = None
+        
+        # 디버그 로그 추가
+        print(f"[DEBUG] kind_callback - 던전 종류 선택됨: {self.selected_kind}")
+        print(f"[DEBUG] kind_callback - 난이도 초기화: diff={self.selected_diff}")
+        
         await interaction.response.defer()
         await self.update_embed(interaction)
     
     async def diff_callback(self, interaction: Interaction):
         self.selected_diff = interaction.data["values"][0]
+        
+        # 디버그 로그 추가
+        print(f"[DEBUG] diff_callback - 난이도 선택됨: {self.selected_diff}")
+        
         await interaction.response.defer()
         await self.update_embed(interaction)
     
     async def max_participants_callback(self, interaction: Interaction):
         self.max_participants = int(interaction.data["values"][0])
+        
+        # 디버그 로그 추가
+        print(f"[DEBUG] max_participants_callback - 최대 인원 설정: {self.max_participants}")
+        
         await interaction.response.defer()
         await self.update_embed(interaction)
     
-    def update_buttons(self, interaction: discord.Interaction = None):
-        """버튼 상태를 업데이트합니다."""
-        # 모든 버튼 제거
-        for item in self.children.copy():
-            if isinstance(item, ui.Button):
-                self.remove_item(item)
-        
-        if self.status == "pending":
-            # 모집 등록 상태일 때
-            content_button = ui.Button(label="모집 내용 작성", style=discord.ButtonStyle.success, custom_id="btn_content", row=4)
-            content_button.callback = self.btn_content_callback
-            self.add_item(content_button)
-            
-            register_button = ui.Button(label="모집 등록", style=discord.ButtonStyle.primary, custom_id="btn_register", row=4)
-            register_button.callback = self.btn_register_callback
-            self.add_item(register_button)
-        else:
-            # 등록된 모집 공고일 때
-            join_button = ui.Button(label="참가하기", style=discord.ButtonStyle.success, custom_id="btn_join", row=4)
-            join_button.callback = self.btn_join_callback
-            self.add_item(join_button)
-            
-            cancel_button = ui.Button(label="신청 취소", style=discord.ButtonStyle.danger, custom_id="btn_cancel", row=4)
-            cancel_button.callback = self.btn_cancel_callback
-            self.add_item(cancel_button)
-            
-            # 모집 생성자에게만 모집 취소 버튼 표시
-            if interaction and interaction.user.id == self.creator_id:
-                delete_button = ui.Button(label="모집 취소", style=discord.ButtonStyle.danger, custom_id="btn_delete", row=4)
-                delete_button.callback = self.btn_delete_callback
-                self.add_item(delete_button)
-
     async def btn_content_callback(self, interaction: discord.Interaction):
         """모집 내용 작성 버튼 콜백"""
         modal = RecruitmentModal()
         modal.parent = self
         await interaction.response.send_modal(modal)
+        # 모달 제출 후 버튼 상태가 RecruitmentModal에서 업데이트됨
 
     async def btn_register_callback(self, interaction: discord.Interaction):
         """모집 등록 버튼 클릭 시 호출되는 콜백"""
         try:
+            # 디버그 로그 추가
+            print(f"[DEBUG] btn_register_callback - 시작")
+            print(f"[DEBUG] btn_register_callback - 필수값 상태: type={bool(self.selected_type)}, kind={bool(self.selected_kind)}, diff={bool(self.selected_diff)}, content={bool(self.recruitment_content)}, max_participants={bool(self.max_participants)}")
+            print(f"[DEBUG] btn_register_callback - 필수값 실제 값: type={self.selected_type}, kind={self.selected_kind}, diff={self.selected_diff}, content_len={len(self.recruitment_content) if self.recruitment_content else 0}, max_participants={self.max_participants}")
+            
             # 필수 정보 확인
             if not all([self.selected_type, self.selected_kind, self.selected_diff, self.recruitment_content, self.max_participants]):
+                print(f"[DEBUG] btn_register_callback - 필수 정보 누락됨, 등록 취소")
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("모든 필수 정보를 입력해주세요.", ephemeral=True)
                 await asyncio.sleep(2)
@@ -361,9 +443,6 @@ class RecruitmentCard(ui.View):
             # DB에 저장
             result = await self.db["recruitments"].insert_one(recruitment_data)
             self.recruitment_id = str(result.inserted_id)
-            
-            # 버튼 업데이트
-            self.update_buttons()
             
             # 임베드 업데이트
             embed = self.get_embed()
@@ -457,11 +536,20 @@ class RecruitmentCard(ui.View):
                 }
             )
             
-            # 버튼 업데이트
-            self.update_buttons(interaction)
-            
-            # 임베드 업데이트
-            await self.update_embed(interaction)
+            try:
+                # 임베드만 먼저 업데이트
+                embed = self.get_embed()
+                await interaction.message.edit(embed=embed)
+                
+                # 모든 UI 요소를 제거한 뷰로 업데이트
+                self.clear_items()
+                cancelled_text = ui.Button(label="모집이 취소되었습니다", style=discord.ButtonStyle.secondary, disabled=True, row=0)
+                self.add_item(cancelled_text)
+                await interaction.message.edit(view=self)
+            except Exception as e:
+                print(f"[ERROR] btn_delete_callback - 메시지 편집 오류: {e}")
+                import traceback
+                print(f"[ERROR] btn_delete_callback - 상세 오류: {traceback.format_exc()}")
             
             # 모집 취소 메시지
             await interaction.response.defer(ephemeral=True)
