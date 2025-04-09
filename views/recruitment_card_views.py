@@ -1,27 +1,21 @@
 import discord
-from discord import ui, SelectOption, Interaction, TextStyle, ModalSubmit, InputText, InputTextStyle
+from discord import ui, SelectOption, Interaction, TextStyle
 import asyncio
 import datetime
 from bson.objectid import ObjectId
 
 
-class RecruitmentModal(ui.Modal):
-    def __init__(self):
-        super().__init__(title="모집 내용 작성", timeout=None)
-        
-        # 모집 내용 입력 필드
-        self.content = ui.InputText(
-            label="모집 내용",
-            style=InputTextStyle.paragraph,
-            placeholder="모집에 대한 상세 내용을 입력해주세요. (최대 500자)",
-            max_length=500,
-            min_length=1,
-            required=True
-        )
-        self.add_item(self.content)
-        self.parent = None  # 부모 뷰 참조 저장
+class RecruitmentModal(ui.Modal, title="모집 내용 작성"):
+    content = ui.TextInput(
+        label="모집 내용",
+        style=TextStyle.paragraph,
+        placeholder="모집에 대한 상세 내용을 입력해주세요. (최대 500자)",
+        max_length=500,
+        min_length=1,
+        required=True
+    )
     
-    async def callback(self, interaction: Interaction):
+    async def on_submit(self, interaction: Interaction):
         try:
             # 부모 뷰가 없으면 종료
             if not self.parent:
@@ -98,7 +92,7 @@ class KindSelectView(ui.View):
 
 class DiffSelectView(ui.View):
     def __init__(self, parent):
-        super().__init__(timeout=60)
+        super().__init__(timeout=None)
         self.parent = parent
         difficulties = sorted({d["difficulty"] for d in self.parent.dungeons
                                if d["type"] == self.parent.selected_type and d["name"] == self.parent.selected_kind})
