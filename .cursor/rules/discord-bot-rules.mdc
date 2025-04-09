@@ -1,0 +1,31 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+# Discord Bot Project Rule
+
+**Project Overview:** This project is a Discord bot built with the `discord.py` library. The codebase is organized into distinct modules for **commands** and **cogs**, and uses a `.env` file for configuration. A Python virtual environment is in use, containing all the necessary libraries for the bot.
+
+## Project Structure and Components
+
+- **Commands Directory (`commands/`):** Contains individual command modules (e.g., Python files defining bot commands). Each command may be a function or a class using the discord.py commands framework. When answering questions, consider that command logic might be defined across multiple files here.
+- **Cogs Directory (`cogs/`):** Contains cog classes that group related commands and event listeners. Cogs in discord.py are typically classes that subclass `commands.Cog` and are loaded by the bot. Ensure any analysis or suggestions take into account how these cogs are set up and interact (e.g., initialization in a main bot file, registration of cogs).
+- **Configuration (.env file):** The `.env` file provides configuration such as `BOT_TOKEN`, API keys, and other environment-specific settings. The code likely uses these via environment variables. **Do not hard-code** such values in answers; always suggest using the config (for example, using `os.getenv('BOT_TOKEN')` or a config loader) rather than plain literals. Assume that sensitive info is stored here and should be kept secure.
+- **Dependencies (Virtual Env):** The project’s virtual environment includes installed libraries like `discord.py` (for Discord API interactions) and possibly others (e.g., `python-dotenv` for loading env files, HTTP clients for web requests, etc.). When formulating answers or improvements, leverage these libraries when appropriate. For instance, if the user asks how to implement a web request, note if `aiohttp` or `requests` is already in the venv. Also, be aware of the versions – if the query is about an issue that’s fixed in a newer version of a library, you might suggest upgrading that library.
+
+## Guidelines for AI Assistance
+
+- **Consider the Entire Codebase:** When answering any question about this project, always take into account *all relevant files* in the codebase. This means you should cross-reference the `commands/` and `cogs/` modules (and any other source files) to provide an informed answer. Avoid limiting your context to a single file if the solution might involve changes or understanding across multiple modules.
+- **Incorporate Project Conventions:** Follow the project’s existing patterns and conventions in suggestions. For example, if new functionality is asked about, suggest implementing it as a new **command** or **cog** (consistent with the current structure). If the project uses certain naming conventions or utility functions, adhere to those in any generated code.
+- **Utilize Existing Libraries:** Be mindful of the libraries available in the environment. If a task can be solved by a library that’s already installed, prefer using that over writing something from scratch. For instance, use discord.py’s built-in features for tasks like scheduling tasks, parsing commands, or handling exceptions, rather than reinventing them. Likewise, if configuration management is handled by a library (e.g., `dotenv`), use it instead of custom code.
+- **Respect Configuration and Security:** Always handle configuration values (like tokens or keys from the `.env`) properly. In answers, if relevant, remind to load these from environment variables and **never expose them** in plain text. If the user asks about an error related to a missing config, suggest checking the `.env` setup or environment variable loading.
+- **Suggest Holistic Improvements:** When the user asks for ways to improve or optimize the bot, consider suggestions that span multiple components. This could include refactoring duplicate code spread across commands, improving how cogs communicate or share data, updating a library to a newer version for performance gains, or implementing error handling and logging consistently throughout the project. Ensure that improvement suggestions are grounded in the context of the entire project (for example, don't suggest a change that would conflict with how another part of the code works).
+
+_By following this rule, the AI assistant will always be aware of the Discord bot’s overall context and use that knowledge to provide accurate, context-rich answers. The aim is to make the AI's assistance more **holistic and project-aware**, leading to solutions and advice that fit seamlessly with the bot's codebase and its dependencies._
