@@ -20,10 +20,10 @@ class RecruitmentCard(ui.View):
         self.recruitment_content = None
         self.message = None  # persistent 메시지 저장
         self.status = "pending"  # 초기 상태: pending
-        self.recruitment_id = None  # DB에 저장된 모집 ID
+        self.recruitment_id = None  # DB에 저장된 모집 ID (MongoDB _id)
         self.participants = []  # 참가자 목록
         self.max_participants = 4  # 기본 최대 인원 수 (본인 포함)
-        self.target_channel_id = None  # 모집 공고를 게시할 채널 ID
+        self.announcement_channel_id = None  # 모집 공고를 게시할 채널 ID
         self.announcement_message_id = None  # 모집 공고 메시지 ID
         self.creator_id = None  # 모집 생성자 ID
         
@@ -204,18 +204,27 @@ class RecruitmentCard(ui.View):
         embed = self.get_embed()
         
         # 참가자 목록 업데이트
-        participants_text = ""
+        participants_text = f"현재 {len(self.participants)}/{self.max_participants}명 참가 중\n"
         for i, p_id in enumerate(self.participants):
-            participant = interaction.guild.get_member(p_id)
-            if participant:
-                participants_text += f"{i+1}. {participant.display_name}\n"
-            else:
-                participants_text += f"{i+1}. 알 수 없는 사용자 ({p_id})\n"
+            try:
+                participant = interaction.guild.get_member(p_id)
+                if participant:
+                    participants_text += f"{i+1}. {participant.mention} ({participant.display_name})\n"
+                else:
+                    participants_text += f"{i+1}. <@{p_id}> (알 수 없는 사용자)\n"
+            except Exception as e:
+                print(f"[ERROR] 참가자 정보 조회 중 오류: {e}")
+                participants_text += f"{i+1}. <@{p_id}>\n"
         
         # 참가자 필드 업데이트
         for i, field in enumerate(embed.fields):
             if field.name.startswith("참가자"):
-                embed.set_field_at(i, name=f"참가자 ({len(self.participants)}/{self.max_participants})", value=participants_text or "없음", inline=False)
+                embed.set_field_at(
+                    i, 
+                    name=f"참가자 목록", 
+                    value=participants_text or "참가자가 없습니다.", 
+                    inline=False
+                )
                 break
         
         return embed
@@ -329,7 +338,7 @@ class RecruitmentCard(ui.View):
             
             # 모집 상태 변경
             self.status = "active"
-            self.creator_id = str(interaction.user.id)
+            self.creator_id = int(interaction.user.id)
             
             # 생성자를 참가자 목록에 추가
             self.participants = [self.creator_id]
@@ -341,8 +350,8 @@ class RecruitmentCard(ui.View):
                 "difficulty": self.selected_diff,
                 "description": self.recruitment_content,
                 "max_participants": self.max_participants,
-                "participants": self.participants,
-                "creator_id": self.creator_id,
+                "participants": [str(p) for p in self.participants],
+                "creator_id": str(self.creator_id),
                 "status": self.status,
                 "guild_id": str(interaction.guild_id),
                 "created_at": datetime.datetime.now().isoformat(),
@@ -388,11 +397,12 @@ class RecruitmentCard(ui.View):
             if announcement_message:
                 # 공고 메시지 정보 저장
                 await self.db["recruitments"].update_one(
-                    {"_id": result.inserted_id},
+                    {"_id": ObjectId(self.recruitment_id)},
                     {
                         "$set": {
                             "announcement_message_id": str(announcement_message.id),
-                            "announcement_channel_id": str(announcement_message.channel.id)
+                            "announcement_channel_id": str(announcement_message.channel.id),
+                            "updated_at": datetime.datetime.now().isoformat()
                         }
                     }
                 )
@@ -413,51 +423,166 @@ class RecruitmentCard(ui.View):
 
     async def btn_delete_callback(self, interaction: discord.Interaction):
         """모집 취소 버튼 콜백"""
-        # 모집 생성자만 취소 가능
-        if interaction.user.id != self.creator_id:
+        try:
+            # 모집 생성자만 취소 가능
+            if interaction.user.id != self.creator_id:
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("모집 생성자만 취소할 수 있습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+                return
+            
+            # 모집 취소 처리
+            self.status = "cancelled"
+            
+            # DB 업데이트
+            await self.db["recruitments"].update_one(
+                {"_id": ObjectId(self.recruitment_id)},
+                {
+                    "$set": {
+                        "status": "cancelled",
+                        "updated_at": datetime.datetime.now().isoformat()
+                    }
+                }
+            )
+            
+            # 뷰 상태 업데이트
+            await self.db["view_states"].update_one(
+                {"message_id": str(interaction.message.id)},
+                {
+                    "$set": {
+                        "status": "cancelled",
+                        "updated_at": datetime.datetime.now().isoformat()
+                    }
+                }
+            )
+            
+            # 버튼 업데이트
+            self.update_buttons(interaction)
+            
+            # 임베드 업데이트
+            await self.update_embed(interaction)
+            
+            # 모집 취소 메시지
             await interaction.response.defer(ephemeral=True)
-            msg = await interaction.followup.send("모집 생성자만 취소할 수 있습니다.", ephemeral=True)
+            msg = await interaction.followup.send("모집이 취소되었습니다.", ephemeral=True)
             await asyncio.sleep(2)
             await msg.delete()
-            return
-        
-        # 모집 취소 처리
-        self.status = "cancelled"
-        
-        # 버튼 업데이트
-        self.update_buttons(interaction)
-        
-        # 임베드 업데이트
-        await self.update_embed(interaction)
-        
-        # 모집 취소 메시지
-        await interaction.response.defer(ephemeral=True)
-        msg = await interaction.followup.send("모집이 취소되었습니다.", ephemeral=True)
-        await asyncio.sleep(2)
-        await msg.delete()
+            
+        except Exception as e:
+            print(f"[ERROR] 모집 취소 중 오류 발생: {e}")
+            import traceback
+            print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("모집 취소 중 오류가 발생했습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+
+    async def create_private_thread(self, interaction: discord.Interaction):
+        """모집 완료 시 스레드를 생성합니다."""
+        try:
+            # 모집자 ID 가져오기
+            creator_id = int(self.participants[0]) if self.participants else None
+            
+            # 모집자만 스레드 생성 가능
+            if interaction.user.id != creator_id:
+                if not interaction.response.is_done():
+                    await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("모집자만 스레드를 생성할 수 있습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+                return
+            
+            # 스레드 이름 생성
+            thread_name = f"{self.selected_kind} {self.selected_diff}"
+            
+            # 스레드 생성
+            thread = await interaction.channel.create_thread(
+                name=thread_name,
+                type=discord.ChannelType.public_thread,
+                auto_archive_duration=60  # 기본값 1시간
+            )
+            
+            # 스레드 ID 저장
+            now = datetime.datetime.now().isoformat()
+            await self.db["recruitments"].update_one(
+                {"_id": ObjectId(self.recruitment_id)},
+                {
+                    "$set": {
+                        "thread_id": str(thread.id),
+                        "thread_status": "pending",
+                        "updated_at": now
+                    }
+                }
+            )
+            
+            # 스레드 설정용 뷰 생성
+            archive_view = ThreadArchiveView(
+                self.recruitment_id, 
+                self.participants, 
+                self.selected_type, 
+                self.selected_kind, 
+                self.selected_diff, 
+                self.recruitment_content,
+                self.db
+            )
+            
+            # 모집자에게만 보이는 메시지 전송
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+            msg = await interaction.followup.send(f"스레드가 생성되었습니다. 보관 기간을 설정해주세요.", ephemeral=True)
+            await asyncio.sleep(2)
+            await msg.delete()
+            
+            # 스레드에 보관 기간 설정 메시지 전송
+            await thread.send(f"<@{creator_id}> 스레드 보관 기간을 설정해주세요.", view=archive_view)
+            
+        except Exception as e:
+            print(f"스레드 생성 중 오류 발생: {e}")
+            import traceback
+            print(f"상세 오류: {traceback.format_exc()}")
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+            msg = await interaction.followup.send("스레드 생성 중 오류가 발생했습니다.", ephemeral=True)
+            await asyncio.sleep(2)
+            await msg.delete()
 
     async def btn_join_callback(self, interaction: discord.Interaction):
         """참가하기 버튼 클릭 시 호출되는 콜백"""
         try:
+            # 오류 발생을 방지하기 위해 응답 먼저 처리
+            await interaction.response.defer(ephemeral=True)
+            
             # 모집 정보 가져오기
             recruitment = await self.db["recruitments"].find_one({"_id": ObjectId(self.recruitment_id)})
             if not recruitment:
                 print(f"[ERROR] 모집 정보를 찾을 수 없음: {self.recruitment_id}")
-                await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("모집 정보를 찾을 수 없습니다.", ephemeral=True)
                 await asyncio.sleep(2)
                 await msg.delete()
                 return
             
+            # 모집 상태 확인 (이미 완료된 모집인지)
+            if recruitment.get("status") == "complete":
+                msg = await interaction.followup.send("이미 완료된 모집입니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+                return
+            
+            # 최신 참가자 목록 가져오기 (동시성 문제 방지)
+            up_to_date_participants = recruitment.get("participants", [])
+            # 문자열 ID를 정수로 변환
+            self.participants = [int(p) if isinstance(p, str) and p.isdigit() else p for p in up_to_date_participants]
+            
             # 사용자 ID
-            user_id = str(interaction.user.id)
+            user_id = int(interaction.user.id)
             
             # 슈퍼유저 체크
             is_super = self.is_super_user(interaction.user)
             
             # 이미 참가한 경우 (슈퍼유저는 중복 참가 가능)
             if not is_super and user_id in self.participants:
-                await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("이미 참가 신청하셨습니다.", ephemeral=True)
                 await asyncio.sleep(2)
                 await msg.delete()
@@ -466,7 +591,6 @@ class RecruitmentCard(ui.View):
             # 최대 인원 초과 확인 (슈퍼유저도 인원 제한 적용)
             current_participants = len(self.participants)
             if current_participants >= self.max_participants:
-                await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send(f"모집 인원이 마감되었습니다. (최대 {self.max_participants}명)", ephemeral=True)
                 await asyncio.sleep(2)
                 await msg.delete()
@@ -474,42 +598,81 @@ class RecruitmentCard(ui.View):
             
             # 참가자 추가 (슈퍼유저는 중복 추가 가능)
             if is_super or user_id not in self.participants:
-                await self.db["recruitments"].update_one(
-                    {"_id": ObjectId(self.recruitment_id)},
-                    {"$push": {"participants": user_id}}
-                )
-                
                 # 참가자 목록 업데이트
                 self.participants.append(user_id)
+                
+                # DB 업데이트
+                await self.db["recruitments"].update_one(
+                    {"_id": ObjectId(self.recruitment_id)},
+                    {
+                        "$set": {
+                            "participants": [str(p) for p in self.participants],
+                            "updated_at": datetime.datetime.now().isoformat()
+                        }
+                    }
+                )
+                
+                # 뷰 상태 업데이트
+                await self.db["view_states"].update_one(
+                    {"message_id": str(interaction.message.id)},
+                    {
+                        "$set": {
+                            "participants": [str(p) for p in self.participants],
+                            "updated_at": datetime.datetime.now().isoformat()
+                        }
+                    },
+                    upsert=True
+                )
                 
                 # 임베드 업데이트
                 embed = self.get_embed()
                 await interaction.message.edit(embed=embed, view=self)
                 
-                await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("참가 신청이 완료되었습니다.", ephemeral=True)
                 await asyncio.sleep(2)
                 await msg.delete()
                 
                 # 인원이 다 찼는지 확인
                 if len(self.participants) >= self.max_participants:
-                    # 모집 상태를 "complete"로 변경
-                    self.status = "complete"
-                    
-                    # DB 업데이트
-                    await self.db["recruitments"].update_one(
-                        {"_id": ObjectId(self.recruitment_id)},
-                        {"$set": {"status": "complete"}}
-                    )
-                    
-                    # 임베드 업데이트
-                    embed = self.get_embed()
-                    await interaction.message.edit(embed=embed, view=self)
-                    
-                    # 비밀 스레드 생성
-                    await self.create_private_thread(interaction)
+                    # 모집 상태를 "complete"로 변경하기 전에 동시성 검사
+                    # 최신 상태 다시 확인
+                    latest_recruitment = await self.db["recruitments"].find_one({"_id": ObjectId(self.recruitment_id)})
+                    if latest_recruitment.get("status") != "complete":
+                        # 모집 상태를 "complete"로 변경
+                        self.status = "complete"
+                        
+                        # DB 업데이트
+                        await self.db["recruitments"].update_one(
+                            {"_id": ObjectId(self.recruitment_id)},
+                            {
+                                "$set": {
+                                    "status": "complete",
+                                    "updated_at": datetime.datetime.now().isoformat()
+                                }
+                            }
+                        )
+                        
+                        # 뷰 상태 업데이트
+                        await self.db["view_states"].update_one(
+                            {"message_id": str(interaction.message.id)},
+                            {
+                                "$set": {
+                                    "status": "complete",
+                                    "updated_at": datetime.datetime.now().isoformat()
+                                }
+                            }
+                        )
+                        
+                        # 임베드 업데이트
+                        embed = self.get_embed()
+                        await interaction.message.edit(embed=embed, view=self)
+                        
+                        # 비밀 스레드 생성
+                        await self.create_private_thread(interaction)
+                    else:
+                        # 이미 완료 상태인 경우
+                        print(f"[INFO] 모집 ID {self.recruitment_id}는 이미 완료 상태입니다.")
             else:
-                await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("이미 참가 신청하셨습니다.", ephemeral=True)
                 await asyncio.sleep(2)
                 await msg.delete()
@@ -520,9 +683,9 @@ class RecruitmentCard(ui.View):
             print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
-                msg = await interaction.followup.send("참가 신청 중 오류가 발생했습니다.", ephemeral=True)
-                await asyncio.sleep(2)
-                await msg.delete()
+            msg = await interaction.followup.send("참가 신청 중 오류가 발생했습니다.", ephemeral=True)
+            await asyncio.sleep(2)
+            await msg.delete()
 
     async def btn_cancel_callback(self, interaction: discord.Interaction):
         """신청 취소 버튼 클릭 시 호출되는 콜백"""
@@ -538,10 +701,10 @@ class RecruitmentCard(ui.View):
                 return
             
             # 사용자 ID
-            user_id = str(interaction.user.id)
+            user_id = int(interaction.user.id)
             
             # 참가 신청한 사용자인지 확인
-            if user_id not in recruitment.get("participants", []):
+            if user_id not in self.participants:
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("참가 신청한 내역이 없습니다.", ephemeral=True)
                 await asyncio.sleep(2)
@@ -549,7 +712,7 @@ class RecruitmentCard(ui.View):
                 return
             
             # 모집 생성자는 참가 취소 불가능
-            if user_id == recruitment.get("creator_id"):
+            if user_id == self.creator_id:
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("모집 생성자는 참가를 취소할 수 없습니다.", ephemeral=True)
                 await asyncio.sleep(2)
@@ -557,13 +720,29 @@ class RecruitmentCard(ui.View):
                 return
             
             # 참가자 제거
+            self.participants.remove(user_id)
+            
+            # DB 업데이트
             await self.db["recruitments"].update_one(
                 {"_id": ObjectId(self.recruitment_id)},
-                {"$pull": {"participants": user_id}}
+                {
+                    "$set": {
+                        "participants": [str(p) for p in self.participants],
+                        "updated_at": datetime.datetime.now().isoformat()
+                    }
+                }
             )
             
-            # 참가자 목록 업데이트
-            self.participants.remove(user_id)
+            # 뷰 상태 업데이트
+            await self.db["view_states"].update_one(
+                {"message_id": str(interaction.message.id)},
+                {
+                    "$set": {
+                        "participants": [str(p) for p in self.participants],
+                        "updated_at": datetime.datetime.now().isoformat()
+                    }
+                }
+            )
             
             # 임베드 업데이트
             embed = self.get_embed()
@@ -584,106 +763,77 @@ class RecruitmentCard(ui.View):
                 await asyncio.sleep(2)
                 await msg.delete()
 
-    async def create_private_thread(self, interaction: discord.Interaction):
-        """모집 완료 시 비밀 스레드를 생성합니다."""
-        try:
-            # 스레드 이름 생성
-            thread_name = f"{self.selected_type} {self.selected_kind} {self.selected_diff} 모집 완료"
-            
-            # 스레드 생성
-            thread = await interaction.message.create_thread(
-                name=thread_name,
-                auto_archive_duration=60  # 1시간 후 자동 보관
-            )
-            
-            # 모집자 멘션과 함께 보관 기간 선택 메시지 전송
-            author = self.participants[0]  # 첫 번째 참가자가 모집자
-            archive_view = ThreadArchiveView(
-                self.db, 
-                self.recruitment_id, 
-                str(thread.id),
-                self.participants, 
-                self.selected_type, 
-                self.selected_kind, 
-                self.selected_diff, 
-                self.recruitment_content,
-                str(interaction.guild_id)
-            )
-            
-            await thread.send(
-                f"<@{author}>\n"
-                f"## 스레드 보관 기간을 선택해주세요\n"
-                f"아래 버튼에서 스레드 유지 기간을 선택하면\n"
-                f"다른 참가자들이 초대되고 채팅이 시작됩니다.",
-                view=archive_view
-            )
-            
-            # DB에 스레드 정보 저장
-            await self.db["recruitments"].update_one(
-                {"_id": ObjectId(self.recruitment_id)},
-                {
-                    "$set": {
-                        "thread_id": str(thread.id),
-                        "thread_created_at": datetime.datetime.now().isoformat()
-                    }
-                }
-            )
-            
-        except Exception as e:
-            print(f"[ERROR] 스레드 생성 중 오류 발생: {e}")
-            import traceback
-            print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
-            await interaction.followup.send("스레드 생성 중 오류가 발생했습니다.", ephemeral=True)
-
     # 슈퍼유저 체크 함수
     def is_super_user(self, user):
         """사용자가 슈퍼유저인지 확인"""
         return str(user.id) == SUPER_USER_ID
 
+    def get_thread_embed(self):
+        """스레드용 임베드를 생성합니다."""
+        embed = discord.Embed(
+            title=f"파티 모집 정보 - {self.selected_type} {self.selected_kind} {self.selected_diff}",
+            description="모집이 완료된 파티 정보입니다.",
+            color=discord.Color.green()
+        )
+        
+        # 던전 정보 추가
+        embed.add_field(name="던전 유형", value=f"`{self.selected_type}`", inline=True)
+        embed.add_field(name="던전 종류", value=f"`{self.selected_kind}`", inline=True)
+        embed.add_field(name="난이도", value=f"`{self.selected_diff}`", inline=True)
+        
+        # 구분선
+        embed.add_field(name="\u200b", value="───────────────", inline=False)
+        
+        # 모집 내용
+        if self.recruitment_content:
+            embed.add_field(name="모집 내용", value=self.recruitment_content, inline=False)
+        
+        # 구분선
+        embed.add_field(name="\u200b", value="───────────────", inline=False)
+        
+        # 참가자 목록
+        participants_text = f"총 {len(self.participants)}/{len(self.participants)}명 참가\n"
+        for i, p_id in enumerate(self.participants):
+            participants_text += f"{i+1}. <@{p_id}>\n"
+        
+        embed.add_field(name="참가자 명단", value=participants_text, inline=False)
+        
+        # 기타 정보
+        if self.creator_id:
+            embed.add_field(name="모집자", value=f"<@{self.creator_id}>", inline=True)
+        
+        if self.recruitment_id:
+            embed.set_footer(text=f"모집 ID: {self.recruitment_id}")
+        
+        return embed
+
 # 스레드 보관 기간 선택을 위한 뷰 클래스
-class ThreadArchiveView(ui.View):
-    def __init__(self, db, recruitment_id, thread_id, participants, dungeon_type, dungeon_kind, dungeon_diff, recruitment_content, guild_id):
-        super().__init__(timeout=None)  # 타임아웃 없음 (영구적으로 유지)
-        self.db = db
+class ThreadArchiveView(discord.ui.View):
+    def __init__(self, recruitment_id, participants, dungeon_type, dungeon_kind, dungeon_diff, recruitment_content, db):
+        super().__init__(timeout=None)
         self.recruitment_id = recruitment_id
-        self.thread_id = thread_id
         self.participants = participants
         self.dungeon_type = dungeon_type
         self.dungeon_kind = dungeon_kind
         self.dungeon_diff = dungeon_diff
         self.recruitment_content = recruitment_content
-        self.guild_id = guild_id
-    
-    @ui.button(label="1일", style=discord.ButtonStyle.primary, custom_id="archive_1day")
-    async def btn_archive_1day(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.set_archive_duration(interaction, 1440)  # 1일 (분 단위)
-    
-    @ui.button(label="3일", style=discord.ButtonStyle.primary, custom_id="archive_3days")
-    async def btn_archive_3days(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.set_archive_duration(interaction, 4320)  # 3일 (분 단위)
-    
-    @ui.button(label="7일", style=discord.ButtonStyle.primary, custom_id="archive_7days")
-    async def btn_archive_7days(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.set_archive_duration(interaction, 10080)  # 7일 (분 단위)
-    
-    @ui.button(label="1시간 (테스트)", style=discord.ButtonStyle.danger, custom_id="archive_1hour", row=1)
-    async def btn_archive_1hour(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 슈퍼유저 체크
-        if interaction.user.name != "힝트" and interaction.user.display_name != "힝트":
-            await interaction.response.defer(ephemeral=True)
-            msg = await interaction.followup.send("이 버튼은 슈퍼유저만 사용할 수 있습니다.", ephemeral=True)
-            await asyncio.sleep(2)
-            await msg.delete()
-            return
-        await self.set_archive_duration(interaction, 60)  # 1시간
+        self.db = db
+        self.thread_archive_duration = None
+        self.thread_status = "pending"  # pending, active, archived
+        
+        # 보관 기간 선택 버튼 추가
+        self.add_item(ThreadArchiveButton(60, "1시간 (테스트용)"))
+        self.add_item(ThreadArchiveButton(1440, "1일"))
+        self.add_item(ThreadArchiveButton(4320, "3일"))
+        self.add_item(ThreadArchiveButton(10080, "7일"))
     
     async def set_archive_duration(self, interaction: discord.Interaction, duration_minutes: int):
         try:
             thread = interaction.channel
             
             # 모집자만 버튼을 누를 수 있도록 체크
-            author = self.participants[0]  # 첫 번째 참가자가 모집자
-            if str(interaction.user.id) != author:
+            author_id = int(self.participants[0])  # 첫 번째 참가자가 모집자
+            if interaction.user.id != author_id:
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("모집자만 스레드 보관 기간을 설정할 수 있습니다.", ephemeral=True)
                 await asyncio.sleep(2)
@@ -720,26 +870,56 @@ class ThreadArchiveView(ui.View):
                 {
                     "$set": {
                         "thread_archive_duration": duration_minutes,
+                        "thread_status": "active",
                         "updated_at": now
                     }
                 }
             )
             
-            # 나머지 참가자들을 스레드에 초대하는 메시지 전송
-            other_participants = self.participants[1:]  # 모집자 제외
-            if other_participants:
-                mentions = " ".join([f"<@{p}>" for p in other_participants])
-                thread_name = f"{self.dungeon_type} {self.dungeon_kind} {self.dungeon_diff}"
-                content = (
-                    f"# {thread_name} 모집 완료\n"
-                    f"모집이 완료되었습니다! 참가자 여러분 환영합니다.\n\n"
-                    f"**던전**: {self.dungeon_type} - {self.dungeon_kind} ({self.dungeon_diff})\n"
-                    f"**모집 내용**: {self.recruitment_content}\n\n"
-                    f"**참가자 명단**:\n" + 
-                    "\n".join([f"{i+1}. <@{p}>" for i, p in enumerate(self.participants)])
-                )
-                
-                await thread.send(f"{mentions}\n\n{content}")
+            # 모집 정보 임베드 직접 생성 (RecruitmentCard 사용하지 않음)
+            embed = discord.Embed(
+                title=f"파티 모집 정보 - {self.dungeon_type} {self.dungeon_kind} {self.dungeon_diff}",
+                description="모집이 완료된 파티 정보입니다.",
+                color=discord.Color.green()
+            )
+            
+            # 던전 정보 추가
+            embed.add_field(name="던전 유형", value=f"`{self.dungeon_type}`", inline=True)
+            embed.add_field(name="던전 종류", value=f"`{self.dungeon_kind}`", inline=True)
+            embed.add_field(name="난이도", value=f"`{self.dungeon_diff}`", inline=True)
+            
+            # 구분선
+            embed.add_field(name="\u200b", value="───────────────", inline=False)
+            
+            # 모집 내용
+            if self.recruitment_content:
+                embed.add_field(name="모집 내용", value=self.recruitment_content, inline=False)
+            
+            # 구분선
+            embed.add_field(name="\u200b", value="───────────────", inline=False)
+            
+            # 참가자 목록
+            participants_text = f"총 {len(self.participants)}/{len(self.participants)}명 참가\n"
+            for i, p_id in enumerate(self.participants):
+                participants_text += f"{i+1}. <@{p_id}>\n"
+            
+            embed.add_field(name="참가자 명단", value=participants_text, inline=False)
+            
+            # 기타 정보
+            if len(self.participants) > 0:
+                embed.add_field(name="모집자", value=f"<@{self.participants[0]}>", inline=True)
+            
+            # 보관 기간 정보 푸터에 추가
+            embed.set_footer(text=f"모집 ID: {self.recruitment_id} | 스레드 보관 기간: {duration_minutes // 1440}일")
+            
+            # 모집 완료 임베드 전송
+            await thread.send(embed=embed)
+            
+            # 참가자들 멘션 (모집자 제외)
+            if len(self.participants) > 1:
+                mentions = " ".join([f"<@{p_id}>" for p_id in self.participants[1:]])
+                await thread.send(mentions)
+                await thread.send("파티원분들은 스레드에 참가해주세요!")
             
         except Exception as e:
             print(f"스레드 보관 기간 설정 중 오류 발생: {e}")
@@ -750,3 +930,15 @@ class ThreadArchiveView(ui.View):
                 msg = await interaction.followup.send(f"스레드 보관 기간 설정 중 오류가 발생했습니다: {e}", ephemeral=True)
                 await asyncio.sleep(2)
                 await msg.delete()
+
+class ThreadArchiveButton(discord.ui.Button):
+    def __init__(self, duration_minutes: int, label: str):
+        super().__init__(
+            label=label,
+            style=discord.ButtonStyle.primary,
+            custom_id=f"thread_archive_{duration_minutes}"
+        )
+        self.duration_minutes = duration_minutes
+    
+    async def callback(self, interaction: discord.Interaction):
+        await self.view.set_archive_duration(interaction, self.duration_minutes)
