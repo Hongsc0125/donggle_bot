@@ -61,41 +61,22 @@ jobs:
               real.env \
               ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }}:${{ secrets.REMOTE_TARGET }}
 
-      - name: Install Python and setup environment
+      - name: Install dependencies and restart bot
         run: |
           ssh -p ${{ secrets.REMOTE_PORT }} \
               -i ~/.ssh/id_rsa \
               -o StrictHostKeyChecking=no \
               ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} << 'EOSSH'
-                echo ">>> Installing Python and required packages..."
-                sudo apt-get update
-                sudo apt-get install -y python3 python3-pip python3-venv
-                
                 cd ${{ secrets.REMOTE_TARGET }}
                 
-                echo ">>> Setting up Python virtual environment..."
-                python3 -m venv .venv
+                echo ">>> Activating virtual environment..."
                 source .venv/bin/activate
                 
                 echo ">>> Installing requirements..."
                 pip install -r requirements.txt
                 
-                echo ">>> Python environment setup completed"
-          EOSSH
-
-      - name: Restart Discord Bot
-        run: |
-          ssh -p ${{ secrets.REMOTE_PORT }} \
-              -i ~/.ssh/id_rsa \
-              -o StrictHostKeyChecking=no \
-              ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} << 'EOSSH'
                 echo ">>> Stopping existing bot process..."
                 pkill -f "python bot.py" || echo "No bot process found"
-                
-                cd ${{ secrets.REMOTE_TARGET }}
-                
-                echo ">>> Activating virtual environment..."
-                source .venv/bin/activate
                 
                 echo ">>> Starting Discord bot in background..."
                 nohup python bot.py > bot.log 2>&1 &
