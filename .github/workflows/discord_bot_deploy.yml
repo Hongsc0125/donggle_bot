@@ -75,7 +75,7 @@ jobs:
           ssh -p ${{ secrets.REMOTE_PORT }} \
               -i ~/.ssh/id_rsa \
               -o StrictHostKeyChecking=no \
-              ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} << 'EOSSH'
+              ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} 'bash -s' << 'EOSSH'
                 cd ${{ secrets.REMOTE_TARGET }}
                 
                 echo ">>> Activating virtual environment..."
