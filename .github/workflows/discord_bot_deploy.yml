@@ -99,4 +99,4 @@ jobs:
                   echo ">>> Failed to start bot. Check log files."
                   exit 1
                 fi
-          EOSSH 
+          EOSSH
