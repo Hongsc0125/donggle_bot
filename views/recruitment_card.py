@@ -4,6 +4,7 @@ from views.recruitment_card_views import RecruitmentModal
 import datetime
 from core.config import settings
 import asyncio
+from bson.objectid import ObjectId
 
 # 슈퍼유저 ID 정의
 SUPER_USER_ID = "307620267067179019"
@@ -18,7 +19,7 @@ class RecruitmentCard(ui.View):
         self.selected_diff = None
         self.recruitment_content = None
         self.message = None  # persistent 메시지 저장
-        self.status = "대기중"  # 초기 상태: 대기중
+        self.status = "pending"  # 초기 상태: pending
         self.recruitment_id = None  # DB에 저장된 모집 ID
         self.participants = []  # 참가자 목록
         self.max_participants = 4  # 기본 최대 인원 수 (본인 포함)
@@ -122,105 +123,100 @@ class RecruitmentCard(ui.View):
         select.callback = self.diff_callback
         return select
     
-    def get_embed(self) -> Embed:
-        # 임베드 색상 설정 (파란색 계열)
-        embed = Embed(
-            title="🎮 파티원 모집",
-            color=Color.blue()
-        )
+    def get_embed(self):
+        """현재 상태로 임베드를 생성합니다."""
+        embed = discord.Embed(title="파티 모집 카드", color=discord.Color.blue())
         
-        # 던전 정보 섹션
+        if self.status == "active":
+            embed.description = "현재 모집 중인 파티입니다."
+        elif self.status == "complete":
+            embed.description = "모집이 완료된 파티입니다."
+            embed.color = discord.Color.green()
+        elif self.status == "cancelled":
+            embed.description = "취소된 모집입니다."
+            embed.color = discord.Color.red()
+        else:
+            embed.description = "파티 모집 양식입니다. 아래 항목을 모두 작성해주세요."
+        
+        # 던전 정보 (타입, 종류, 난이도)
         if self.selected_type:
-            # 구분선 추가
-            embed.add_field(
-                name="\n───────────────\n",
-                value="",
-                inline=False
-            )
+            embed.add_field(name="던전 유형", value=f"`{self.selected_type}`", inline=True)
+        else:
+            embed.add_field(name="던전 유형", value="선택되지 않음", inline=True)
             
-            dungeon_info = (
-                f"> `{self.selected_type}`"
-                f" | `{self.selected_kind}`"
-                f" | `{self.selected_diff}`"
-            )
-
-            embed.add_field(
-                name="\n📌 던전 정보\n",
-                value=dungeon_info,
-                inline=False
-            )
-
-            embed.add_field(
-                name="\n───────────────\n",
-                value="",
-                inline=False
-            )
+        if self.selected_kind:
+            embed.add_field(name="던전 종류", value=f"`{self.selected_kind}`", inline=True)
+        else:
+            embed.add_field(name="던전 종류", value="선택되지 않음", inline=True)
+            
+        if self.selected_diff:
+            embed.add_field(name="난이도", value=f"`{self.selected_diff}`", inline=True)
+        else:
+            embed.add_field(name="난이도", value="선택되지 않음", inline=True)
         
-        # 모집 내용 섹션
+        # 구분선
+        embed.add_field(name="\n───────────────\n", value="", inline=False)
+            
+        # 모집 내용
         if self.recruitment_content:
-            embed.add_field(
-                name="\n📝 모집 내용\n",
-                value=f"\n```{self.recruitment_content}```",
-                inline=False
-            )
-
-            embed.add_field(
-                name="\n───────────────\n",
-                value="",
-                inline=False
-            )
+            embed.add_field(name="모집 내용", value=self.recruitment_content, inline=False)
+        else:
+            embed.add_field(name="모집 내용", value="작성되지 않음", inline=False)
+            
+        # 모집 인원
+        if self.max_participants:
+            embed.add_field(name="최대 인원", value=f"{self.max_participants}명", inline=True)
+        else:
+            embed.add_field(name="최대 인원", value="설정되지 않음", inline=True)
+            
+        # 모집 상태
+        if self.status == "active":
+            embed.add_field(name="상태", value="모집 중 🔍", inline=True)
+        elif self.status == "complete":
+            embed.add_field(name="상태", value="모집 완료 ✅", inline=True)
+        elif self.status == "cancelled":
+            embed.add_field(name="상태", value="모집 취소 ❌", inline=True)
+        else:
+            embed.add_field(name="상태", value="작성 중", inline=True)
         
-        # 인원 정보 섹션
-        participants_count = len(self.participants)
-        max_participants = self.max_participants
-        
-        embed.add_field(
-            name="\n👥 인원 현황",
-            value=(
-                f"> `{participants_count}명` / `{max_participants}명`"
-            ),
-            inline=False
-        )
-        
-        # 구분선 추가
-        embed.add_field(
-            name="\n───────────────\n",
-            value="",
-            inline=False
-        )
-        
-        # 참가자 목록 섹션
+        # 구분선
+        embed.add_field(name="\n───────────────\n", value="", inline=False)
+            
+        # 참가자 목록
+        participants_text = ""
         if self.participants:
-            participants_str = "\n".join([
-                f"> <@{p}>" 
-                for p in self.participants
-            ])
-            embed.add_field(
-                name="\n🎯 참가자 목록\n",
-                value=participants_str,
-                inline=False
-            )
+            participants_text = f"현재 {len(self.participants)}/{self.max_participants}명 참가 중\n"
+            for i, p_id in enumerate(self.participants):
+                participants_text += f"{i+1}. <@{p_id}>\n"
+        else:
+            participants_text = "참가자가 없습니다."
         
-            embed.add_field(
-                name="\n───────────────\n",
-                value="",
-                inline=False
-            )
+        embed.add_field(name="참가자 목록", value=participants_text, inline=False)
         
-        # 모집 상태 섹션
-        if self.status:
-            status_emoji = "🟢" if self.status == "대기중" else "✅"
-            embed.add_field(
-                name="\n📊 모집 상태\n",
-                value=f"\n> {status_emoji} `{self.status}`",
-                inline=False
-            )
+        # 모집 ID가 있으면 푸터에 표시
+        if self.recruitment_id:
+            embed.set_footer(text=f"모집 ID: {self.recruitment_id}")
         
-        # 푸터 설정
-        embed.set_footer(
-            text="아래 선택 메뉴에서 각 항목을 선택하세요.",
-            icon_url="https://cdn.discordapp.com/emojis/1234567890123456789.png"  # 원하는 아이콘 URL로 변경 가능
-        )
+        return embed
+        
+    async def update_embed_participants(self, interaction):
+        """참가자 목록을 최신 정보로 업데이트한 임베드를 반환합니다."""
+        embed = self.get_embed()
+        
+        # 참가자 목록 업데이트
+        participants_text = ""
+        for i, p_id in enumerate(self.participants):
+            participant = interaction.guild.get_member(p_id)
+            if participant:
+                participants_text += f"{i+1}. {participant.display_name}\n"
+            else:
+                participants_text += f"{i+1}. 알 수 없는 사용자 ({p_id})\n"
+        
+        # 참가자 필드 업데이트
+        for i, field in enumerate(embed.fields):
+            if field.name.startswith("참가자"):
+                embed.set_field_at(i, name=f"참가자 ({len(self.participants)}/{self.max_participants})", value=participants_text or "없음", inline=False)
+                break
         
         return embed
 
@@ -289,7 +285,7 @@ class RecruitmentCard(ui.View):
             if isinstance(item, ui.Button):
                 self.remove_item(item)
         
-        if self.status == "대기중":
+        if self.status == "pending":
             # 모집 등록 상태일 때
             content_button = ui.Button(label="모집 내용 작성", style=discord.ButtonStyle.success, custom_id="btn_content", row=4)
             content_button.callback = self.btn_content_callback
@@ -331,15 +327,31 @@ class RecruitmentCard(ui.View):
                 await msg.delete()
                 return
             
-            # 모집 ID 생성 (현재 시간 기반)
-            self.recruitment_id = str(int(datetime.datetime.now().timestamp()))
-            
             # 모집 상태 변경
-            self.status = "모집중"
+            self.status = "active"
             self.creator_id = str(interaction.user.id)
             
             # 생성자를 참가자 목록에 추가
             self.participants = [self.creator_id]
+            
+            # 모집 데이터 생성
+            recruitment_data = {
+                "type": self.selected_type,
+                "dungeon": self.selected_kind,
+                "difficulty": self.selected_diff,
+                "description": self.recruitment_content,
+                "max_participants": self.max_participants,
+                "participants": self.participants,
+                "creator_id": self.creator_id,
+                "status": self.status,
+                "guild_id": str(interaction.guild_id),
+                "created_at": datetime.datetime.now().isoformat(),
+                "updated_at": datetime.datetime.now().isoformat()
+            }
+            
+            # DB에 저장
+            result = await self.db["recruitments"].insert_one(recruitment_data)
+            self.recruitment_id = str(result.inserted_id)
             
             # 버튼 업데이트
             self.update_buttons()
@@ -366,24 +378,6 @@ class RecruitmentCard(ui.View):
                 print("[ERROR] PartyCog를 찾을 수 없음")
                 return
             
-            # 모집 데이터 생성
-            recruitment_data = {
-                "recruitment_id": self.recruitment_id,
-                "guild_id": str(interaction.guild_id),
-                "creator_id": self.creator_id,
-                "type": self.selected_type,
-                "kind": self.selected_kind,
-                "difficulty": self.selected_diff,
-                "content": self.recruitment_content,
-                "max_participants": self.max_participants,
-                "participants": self.participants,
-                "status": self.status,
-                "created_at": datetime.datetime.now().isoformat()
-            }
-            
-            # DB에 저장
-            await self.db["recruitments"].insert_one(recruitment_data)
-            
             # 모집 공고 게시
             announcement_message = await party_cog.post_recruitment_announcement(
                 interaction.guild_id,
@@ -394,11 +388,11 @@ class RecruitmentCard(ui.View):
             if announcement_message:
                 # 공고 메시지 정보 저장
                 await self.db["recruitments"].update_one(
-                    {"recruitment_id": self.recruitment_id},
+                    {"_id": result.inserted_id},
                     {
                         "$set": {
                             "announcement_message_id": str(announcement_message.id),
-                            "target_channel_id": str(announcement_message.channel.id)
+                            "announcement_channel_id": str(announcement_message.channel.id)
                         }
                     }
                 )
@@ -428,7 +422,7 @@ class RecruitmentCard(ui.View):
             return
         
         # 모집 취소 처리
-        self.status = "취소됨"
+        self.status = "cancelled"
         
         # 버튼 업데이트
         self.update_buttons(interaction)
@@ -446,7 +440,7 @@ class RecruitmentCard(ui.View):
         """참가하기 버튼 클릭 시 호출되는 콜백"""
         try:
             # 모집 정보 가져오기
-            recruitment = await self.db["recruitments"].find_one({"recruitment_id": self.recruitment_id})
+            recruitment = await self.db["recruitments"].find_one({"_id": ObjectId(self.recruitment_id)})
             if not recruitment:
                 print(f"[ERROR] 모집 정보를 찾을 수 없음: {self.recruitment_id}")
                 await interaction.response.defer(ephemeral=True)
@@ -481,7 +475,7 @@ class RecruitmentCard(ui.View):
             # 참가자 추가 (슈퍼유저는 중복 추가 가능)
             if is_super or user_id not in self.participants:
                 await self.db["recruitments"].update_one(
-                    {"recruitment_id": self.recruitment_id},
+                    {"_id": ObjectId(self.recruitment_id)},
                     {"$push": {"participants": user_id}}
                 )
                 
@@ -499,13 +493,13 @@ class RecruitmentCard(ui.View):
                 
                 # 인원이 다 찼는지 확인
                 if len(self.participants) >= self.max_participants:
-                    # 모집 상태를 "모집 완료"로 변경
-                    self.status = "모집 완료"
+                    # 모집 상태를 "complete"로 변경
+                    self.status = "complete"
                     
                     # DB 업데이트
                     await self.db["recruitments"].update_one(
-                        {"recruitment_id": self.recruitment_id},
-                        {"$set": {"status": "모집 완료"}}
+                        {"_id": ObjectId(self.recruitment_id)},
+                        {"$set": {"status": "complete"}}
                     )
                     
                     # 임베드 업데이트
@@ -534,7 +528,7 @@ class RecruitmentCard(ui.View):
         """신청 취소 버튼 클릭 시 호출되는 콜백"""
         try:
             # 모집 정보 가져오기
-            recruitment = await self.db["recruitments"].find_one({"recruitment_id": self.recruitment_id})
+            recruitment = await self.db["recruitments"].find_one({"_id": ObjectId(self.recruitment_id)})
             if not recruitment:
                 print(f"[ERROR] 모집 정보를 찾을 수 없음: {self.recruitment_id}")
                 await interaction.response.defer(ephemeral=True)
@@ -564,7 +558,7 @@ class RecruitmentCard(ui.View):
             
             # 참가자 제거
             await self.db["recruitments"].update_one(
-                {"recruitment_id": self.recruitment_id},
+                {"_id": ObjectId(self.recruitment_id)},
                 {"$pull": {"participants": user_id}}
             )
             
@@ -626,7 +620,7 @@ class RecruitmentCard(ui.View):
             
             # DB에 스레드 정보 저장
             await self.db["recruitments"].update_one(
-                {"recruitment_id": self.recruitment_id},
+                {"_id": ObjectId(self.recruitment_id)},
                 {
                     "$set": {
                         "thread_id": str(thread.id),
@@ -722,7 +716,7 @@ class ThreadArchiveView(ui.View):
             # DB 업데이트: 스레드 보관 기간 저장
             now = datetime.datetime.now().isoformat()
             await self.db["recruitments"].update_one(
-                {"recruitment_id": self.recruitment_id},
+                {"_id": ObjectId(self.recruitment_id)},
                 {
                     "$set": {
                         "thread_archive_duration": duration_minutes,

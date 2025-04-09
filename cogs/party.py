@@ -6,6 +6,8 @@ import discord
 from discord import app_commands
 from typing import Union, Any
 import asyncio
+from datetime import datetime
+from bson.objectid import ObjectId
 
 # AppCommandChannel 대신 사용할 타입 정의
 class AppCommandChannel:
@@ -128,8 +130,8 @@ class PartyCog(commands.Cog):
             self.announcement_channel_id = await self._load_channel_id("announcement")
             self.registration_channel_id = await self._load_channel_id("registration")
             
-            print(f"[DEBUG] 모집 공고 채널 ID: {self.announcement_channel_id}")
-            print(f"[DEBUG] 모집 등록 채널 ID: {self.registration_channel_id}")
+            print(f"모집 공고 채널 ID를 로드했습니다: {self.announcement_channel_id}")
+            print(f"모집 등록 채널 ID를 로드했습니다: {self.registration_channel_id}")
             
             # 등록 채널 초기화
             if self.registration_channel_id:
@@ -140,8 +142,7 @@ class PartyCog(commands.Cog):
                         # 채널 알림 설정 변경
                         await registration_channel.edit(
                             default_auto_archive_duration=10080,  # 7일
-                            default_thread_auto_archive_duration=10080,  # 7일
-                            default_notification_level=discord.NotificationLevel.ONLY_MENTIONS  # 멘션만 알림
+                            default_thread_auto_archive_duration=10080  # 7일
                         )
                         
                         # 기존 메시지 삭제
@@ -166,8 +167,7 @@ class PartyCog(commands.Cog):
                         # 채널 알림 설정 변경
                         await announcement_channel.edit(
                             default_auto_archive_duration=10080,  # 7일
-                            default_thread_auto_archive_duration=10080,  # 7일
-                            default_notification_level=discord.NotificationLevel.ONLY_MENTIONS  # 멘션만 알림
+                            default_thread_auto_archive_duration=10080  # 7일
                         )
                         print("[DEBUG] 공고 채널 초기화 완료")
                     else:
@@ -261,8 +261,56 @@ class PartyCog(commands.Cog):
             
             print("[DEBUG] 뷰 상태 복원 완료")
             
+            # 봇이 준비된 후 채널 초기화 작업 수행
+            await self.initialize_channels()
+            
         except Exception as e:
             print(f"[ERROR] 뷰 상태 복원 중 오류 발생: {e}")
+            import traceback
+            print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
+            
+    async def initialize_channels(self):
+        """봇이 준비된 후 채널들을 초기화합니다."""
+        try:
+            print("[INFO] 채널 초기화 시작")
+            
+            # 등록 채널 초기화
+            if self.registration_channel_id:
+                print(f"[INFO] 등록 채널 초기화 중: {self.registration_channel_id}")
+                registration_channel = self.bot.get_channel(int(self.registration_channel_id))
+                if registration_channel:
+                    # 채널 알림 설정 변경
+                    await registration_channel.edit(
+                        default_auto_archive_duration=10080,  # 7일
+                        default_thread_auto_archive_duration=10080  # 7일
+                    )
+                    
+                    # 기존 메시지 삭제
+                    await registration_channel.purge(limit=None)
+                    
+                    # 새 등록 양식 생성
+                    await self.create_registration_form(registration_channel)
+                    print("[INFO] 등록 채널 초기화 완료")
+                else:
+                    print(f"[ERROR] 등록 채널을 찾을 수 없음: {self.registration_channel_id}")
+            
+            # 공고 채널 초기화
+            if self.announcement_channel_id:
+                print(f"[INFO] 공고 채널 초기화 중: {self.announcement_channel_id}")
+                announcement_channel = self.bot.get_channel(int(self.announcement_channel_id))
+                if announcement_channel:
+                    # 채널 알림 설정 변경
+                    await announcement_channel.edit(
+                        default_auto_archive_duration=10080,  # 7일
+                        default_thread_auto_archive_duration=10080  # 7일
+                    )
+                    print("[INFO] 공고 채널 초기화 완료")
+                else:
+                    print(f"[ERROR] 공고 채널을 찾을 수 없음: {self.announcement_channel_id}")
+            
+            print("[INFO] 채널 초기화 완료")
+        except Exception as e:
+            print(f"[ERROR] 채널 초기화 중 오류 발생: {e}")
             import traceback
             print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
 
@@ -399,30 +447,40 @@ class PartyCog(commands.Cog):
                 await msg.delete()
 
     async def create_registration_form(self, channel):
-        """새로운 등록 양식을 생성합니다."""
-        try:
-            # 던전 목록이 비어있으면 다시 로드
-            if not self.dungeons:
-                print("[DEBUG] 던전 목록이 비어있어 다시 로드합니다.")
-                dungeons_cursor = self.db["dungeons"].find({})
-                self.dungeons = [doc async for doc in dungeons_cursor]
-                self.dungeons.sort(key=lambda d: (d["type"], d["name"], d["difficulty"]))
-                print(f"[DEBUG] 던전 목록 다시 로드 완료: {len(self.dungeons)}개 던전 로드됨")
-            
-            # 기존 메시지 삭제
-            async for message in channel.history(limit=10):
-                await message.delete()
-            
-            # 새로운 등록 양식 생성
-            view = RecruitmentCard(self.dungeons, self.db)
-            embed = view.get_embed()
-            message = await channel.send(embed=embed, view=view)
-            view.message = message
-            print("[DEBUG] 등록 양식 생성 완료")
-        except Exception as e:
-            print(f"등록 양식 생성 중 오류 발생: {e}")
-            import traceback
-            print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
+        """모집 등록 채널에 빈 양식을 생성합니다."""
+        # 던전 목록 가져오기
+        dungeons_cursor = self.db["dungeons"].find({})
+        dungeons = [doc async for doc in dungeons_cursor]
+        dungeons.sort(key=lambda d: (d["type"], d["name"], d["difficulty"]))
+        
+        # 등록 양식 생성
+        view = RecruitmentCard(dungeons, self.db)
+        embed = view.get_embed()
+        embed.title = "파티 모집 등록 양식"
+        
+        # 등록 잠금 상태이면 안내 메시지 수정 및 버튼 비활성화
+        if self.registration_locked:
+            embed.description = "잠시 후 모집 등록이 가능합니다. 5초만 기다려주세요."
+            # 모든 버튼과 선택 메뉴 비활성화
+            for item in view.children:
+                item.disabled = True
+        else:
+            embed.description = (
+                "아래 순서대로 양식을 작성해주세요:\n\n"
+                "1. **던전 유형** 선택: 일반/레이드/기타 중 선택\n"
+                "2. **던전 종류** 선택: 선택한 유형에 맞는 던전 선택\n"
+                "3. **난이도** 선택: 선택한 던전의 난이도 선택\n"
+                "4. **모집 내용** 입력: 파티 모집에 대한 상세 내용 작성\n"
+                "5. **최대 인원** 설정: 파티 모집 인원 수 설정\n\n"
+                "모든 항목을 작성한 후 '모집 등록' 버튼을 클릭하세요."
+            )
+        
+        # 양식 전송
+        message = await channel.send(embed=embed, view=view)
+        view.message = message  # persistent 메시지 저장
+        self.registration_message = message
+        
+        return message
 
     async def post_recruitment_announcement(self, guild_id, recruitment_data, view):
         """모집 공고를 모집 공고 채널에 게시합니다."""
@@ -473,6 +531,7 @@ class PartyCog(commands.Cog):
             
             # 임베드 생성
             embed = announcement_view.get_embed()
+            embed.title = "파티 모집 공고"
             
             # 공고 메시지 전송 (알림 없음)
             message = await channel.send(embed=embed, view=announcement_view, silent=True)
@@ -481,22 +540,33 @@ class PartyCog(commands.Cog):
             # 뷰 상태를 데이터베이스에 저장
             view_state = {
                 "message_id": str(message.id),
+                "channel_id": str(channel.id),
+                "guild_id": str(guild_id),
                 "recruitment_id": str(view.recruitment_id),
                 "selected_type": view.selected_type,
-                "selected_kind": view.selected_kind,
+                "selected_kind": view.selected_kind, 
                 "selected_diff": view.selected_diff,
                 "recruitment_content": view.recruitment_content,
                 "max_participants": view.max_participants,
                 "status": view.status,
                 "participants": [str(p) for p in view.participants],
                 "creator_id": str(view.creator_id),
-                "guild_id": str(guild_id),
-                "channel_id": str(channel.id)
+                "updated_at": datetime.now()
             }
             await self.db["view_states"].update_one(
                 {"message_id": str(message.id)},
                 {"$set": view_state},
                 upsert=True
+            )
+            
+            # DB에 메시지 ID와 채널 ID 업데이트
+            await self.db["recruitments"].update_one(
+                {"_id": ObjectId(view.recruitment_id)},
+                {"$set": {
+                    "announcement_message_id": str(message.id),
+                    "announcement_channel_id": str(channel.id),
+                    "updated_at": datetime.now()
+                }}
             )
             
             return message
@@ -556,15 +626,20 @@ class PartyCog(commands.Cog):
 
     @tasks.loop(minutes=1)  # 1분마다 실행
     async def cleanup_channel(self):
-        """모집 공고 채널을 정리하는 작업"""
+        """채널 정리 작업"""
         try:
-            print("[DEBUG] 채널 정리 작업 시작")
+            # 데이터베이스에서 모든 모집 정보 조회
+            recruitments = await self.db.recruitments.find({}).to_list(None)
+            active_recruitment_ids = set()
             
-            if not self.announcement_channel_id:
-                print("[DEBUG] 공고 채널 ID가 설정되지 않음")
-                return
-
-            # 채널 가져오기
+            # 활성 모집 ID 목록 생성
+            for recruitment in recruitments:
+                if recruitment.get('status') == 'active':
+                    active_recruitment_ids.add(str(recruitment.get('_id')))
+            
+            print(f"데이터베이스에서 {len(active_recruitment_ids)}개의 활성 모집을 찾았습니다.")
+            
+            # 채널의 모든 메시지 조회
             channel = self.bot.get_channel(int(self.announcement_channel_id))
             if not channel:
                 print(f"[DEBUG] 공고 채널을 찾을 수 없음: {self.announcement_channel_id}")
@@ -572,18 +647,11 @@ class PartyCog(commands.Cog):
 
             print(f"[DEBUG] 공고 채널 확인: {channel.name}")
 
-            # DB에서 활성화된 모집 목록 가져오기
-            active_recruitments = await self.db["recruitments"].find({
-                "status": "active",
-                "guild_id": str(channel.guild.id)
-            }).to_list(length=None)
-
-            active_recruitment_ids = [str(rec["_id"]) for rec in active_recruitments]
-            print(f"[DEBUG] 활성화된 모집 수: {len(active_recruitment_ids)}")
-
-            deleted_count = 0
-            # 채널의 모든 메시지 확인
-            async for message in channel.history(limit=None):
+            # 각 활성 모집에 대해 공고가 있는지 확인 (없으면 새로 게시)
+            message_recruitment_map = {}
+            
+            # 먼저 채널의 메시지 확인
+            async for message in channel.history(limit=100):  # 최근 100개 메시지만 확인
                 try:
                     # 메시지가 임베드를 가지고 있는지 확인
                     if not message.embeds:
@@ -596,33 +664,80 @@ class PartyCog(commands.Cog):
                             recruitment_id = field.value
                             break
 
-                    # 모집 ID가 없거나 활성화된 모집 목록에 없는 경우 메시지 삭제
-                    if not recruitment_id or recruitment_id not in active_recruitment_ids:
-                        # 메시지의 뷰를 비활성화
-                        if message.components:
-                            try:
-                                await message.edit(view=None)
-                            except discord.NotFound:
-                                continue
-                            except Exception as e:
-                                print(f"[ERROR] 뷰 비활성화 중 오류 발생: {e}")
+                    if recruitment_id:
+                        message_recruitment_map[recruitment_id] = message.id
 
-                        # 메시지 삭제
-                        try:
+                except Exception as e:
+                    print(f"[ERROR] 메시지 처리 중 오류 발생: {e}")
+                    continue
+                    
+            # 활성 모집이지만 공고가 없는 경우 새로 게시
+            for recruitment in recruitments:
+                if recruitment["status"] != "active":
+                    continue
+                    
+                recruitment_id = str(recruitment.get('_id'))
+                if recruitment_id not in message_recruitment_map:
+                    try:
+                        print(f"[INFO] 누락된 모집 공고 재게시: {recruitment_id}")
+                        # 모집 데이터로 뷰 생성
+                        view = RecruitmentCard(self.dungeons, self.db)
+                        view.recruitment_id = recruitment_id
+                        view.selected_type = recruitment.get("type", "")
+                        view.selected_kind = recruitment.get("dungeon", "")
+                        view.selected_diff = recruitment.get("difficulty", "")
+                        view.recruitment_content = recruitment.get("description", "")
+                        view.max_participants = recruitment.get("max_participants", 4)
+                        view.status = recruitment.get("status", "active")
+                        view.participants = [int(p) for p in recruitment.get("participants", [])]
+                        view.creator_id = int(recruitment.get("creator_id", 0))
+                        
+                        # 공고 게시
+                        await self.post_recruitment_announcement(channel.guild.id, recruitment, view)
+                    except Exception as e:
+                        print(f"[ERROR] 모집 공고 재게시 중 오류 발생: {e}")
+                        import traceback
+                        print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
+
+            deleted_count = 0
+            # 채널의 모든 메시지 확인하여 완료된 모집만 삭제 (active 상태인 모집은 유지)
+            async for message in channel.history(limit=100):  # 최근 100개 메시지만 확인
+                try:
+                    # 메시지가 임베드를 가지고 있는지 확인
+                    if not message.embeds:
+                        continue
+
+                    # 임베드의 필드에서 모집 ID 찾기
+                    recruitment_id = None
+                    for field in message.embeds[0].fields:
+                        if field.name == "모집 ID":
+                            recruitment_id = field.value
+                            break
+
+                    if recruitment_id:
+                        # 데이터베이스에서 해당 모집 정보 조회
+                        recruitment = await self.db.recruitments.find_one({'_id': ObjectId(recruitment_id)})
+                        
+                        if recruitment:
+                            # 모집 상태가 complete 또는 cancelled인 경우에만 메시지 삭제
+                            if recruitment.get('status') in ['complete', 'cancelled']:
+                                print(f"모집 ID {recruitment_id}의 상태가 {recruitment.get('status')}이므로 메시지를 삭제합니다.")
+                                await message.delete()
+                                deleted_count += 1
+                            else:
+                                print(f"모집 ID {recruitment_id}는 아직 활성 상태입니다.")
+                        else:
+                            # 데이터베이스에 없는 모집의 메시지는 삭제
+                            print(f"모집 ID {recruitment_id}가 데이터베이스에 존재하지 않아 메시지를 삭제합니다.")
                             await message.delete()
                             deleted_count += 1
-                            print(f"[DEBUG] 메시지 삭제: {recruitment_id}")
-                        except discord.NotFound:
-                            continue
-                        except Exception as e:
-                            print(f"[ERROR] 메시지 삭제 중 오류 발생: {e}")
 
                 except Exception as e:
                     print(f"[ERROR] 메시지 처리 중 오류 발생: {e}")
                     continue
 
-            print(f"[DEBUG] 채널 정리 완료. 삭제된 메시지 수: {deleted_count}")
-
+            print(f"[DEBUG] 채널 정리 완료: {deleted_count}개의 메시지가 삭제되었습니다.")
+            
         except Exception as e:
             print(f"[ERROR] 채널 정리 중 오류 발생: {e}")
             import traceback
