@@ -14,17 +14,8 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v3
 
-      - name: Create requirements.txt
-        run: |
-          cat <<EOF > requirements.txt
-          discord.py==2.5.2
-          motor==3.7.0
-          pymongo==4.11.3
-          pydantic==2.11.2
-          pydantic-settings==2.8.1
-          python-dotenv==1.1.0
-          pytz==2025.2
-          EOF
+      - name: List directories for debugging
+        run: ls -la
 
       - name: Configure SSH key
         run: |
@@ -42,13 +33,25 @@ jobs:
           ${{ secrets.REAL }}
           EOF
 
-      - name: Copy project files to remote server
+      - name: Set up remote directory and clean up
         run: |
-          scp -P ${{ secrets.REMOTE_PORT }} \
+          ssh -p ${{ secrets.REMOTE_PORT }} \
               -i ~/.ssh/id_rsa \
               -o StrictHostKeyChecking=no \
-              -r ./bot.py ./cogs ./commands ./core ./database ./models ./services ./views ./requirements.txt \
-              ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }}:${{ secrets.REMOTE_TARGET }}
+              ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} << 'EOSSH'
+                mkdir -p ${{ secrets.REMOTE_TARGET }}
+                # 가상환경과 .env 파일 외 모든 파일 삭제 준비
+                find ${{ secrets.REMOTE_TARGET }} -maxdepth 1 -not -name ".venv" -not -name "real.env" -not -path "${{ secrets.REMOTE_TARGET }}" | xargs rm -rf 2>/dev/null || true
+                echo ">>> Remote directory cleaned and ready for fresh copy"
+          EOSSH
+
+      - name: Copy entire repository to remote server
+        run: |
+          # .git 및 .github 폴더를 제외한 전체 리포지토리 복사
+          rsync -avz --exclude='.git' --exclude='.github' --exclude='.venv' \
+                -e "ssh -p ${{ secrets.REMOTE_PORT }} -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" \
+                ./ ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }}:${{ secrets.REMOTE_TARGET }}/
+          echo ">>> Copied entire repository successfully"
 
       - name: Copy env file to remote server
         run: |
