@@ -29,9 +29,18 @@ jobs:
           
       - name: Create real.env file
         run: |
-          cat <<EOF > real.env
-          ${{ secrets.REAL }}
+          cat << 'EOF' > real.env
+          # MongoDB 설정
+          DATABASE_NAME=${{ secrets.DATABASE_NAME }}
+          DATABASE_URL=${{ secrets.DATABASE_URL }}
+          DB_PW=${{ secrets.DB_PW }}
+          DB_USER=${{ secrets.DB_USER }}
+
+          # DISCORD
+          DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }}
+          APPLICATION_ID=${{ secrets.APPLICATION_ID }}
           EOF
+          cat real.env
 
       - name: Set up remote directory and clean up
         run: |
