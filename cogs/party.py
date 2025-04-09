@@ -1113,25 +1113,8 @@ class PartyCog(commands.Cog):
     async def set_announcement_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
         """모집 공고 채널 설정 명령어 - 관리자 전용"""
         try:
-            # 서버의 길드 ID 가져오기
-            guild_id = str(interaction.guild_id)
-            
-            # 채널 ID 저장
-            await self.db["settings"].update_one(
-                {"guild_id": guild_id},
-                {"$set": {"announcement_channel_id": str(channel.id)}},
-                upsert=True
-            )
-            
-            # 메모리에도 설정 저장
-            self.announcement_channels[guild_id] = str(channel.id)
-            
-            # 응답 메시지
             await interaction.response.defer(ephemeral=True)
-            msg = await interaction.followup.send(f"모집 공고 채널이 {channel.mention}으로 설정되었습니다.", ephemeral=True)
-            await asyncio.sleep(2)
-            await msg.delete()
-            
+            await self.set_announcement_channel_internal(interaction, channel)
         except discord.app_commands.errors.MissingPermissions:
             await interaction.response.send_message("이 명령어는 관리자만 사용할 수 있습니다.", ephemeral=True)
         except Exception as e:
@@ -1140,9 +1123,38 @@ class PartyCog(commands.Cog):
             print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
-                msg = await interaction.followup.send("모집 채널 설정 중 오류가 발생했습니다.", ephemeral=True)
-                await asyncio.sleep(2)
-                await msg.delete()
+            await interaction.followup.send("모집 채널 설정 중 오류가 발생했습니다.", ephemeral=True)
+
+    async def set_announcement_channel_internal(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        """내부적으로 모집 공고 채널을 설정합니다."""
+        try:
+            # 서버의 길드 ID 가져오기
+            guild_id = str(interaction.guild_id)
+            
+            # 채널 ID 저장
+            update_result = await self.db["settings"].update_one(
+                {"guild_id": guild_id},
+                {"$set": {
+                    "announcement_channel_id": str(channel.id),
+                    "updated_at": datetime.now().isoformat()
+                }},
+                upsert=True
+            )
+            
+            # 메모리에도 설정 저장
+            self.announcement_channels[guild_id] = str(channel.id)
+            
+            # 디버그 로그 추가
+            print(f"[INFO] 서버 {guild_id}의 모집 공고 채널이 {channel.id}로 설정되었습니다. DB 결과: {update_result.acknowledged}")
+            
+            # 응답 메시지
+            await interaction.followup.send(f"모집 공고 채널이 {channel.mention}으로 설정되었습니다.", ephemeral=True)
+            
+        except Exception as e:
+            print(f"[ERROR] 모집 공고 채널 설정 중 오류 발생: {e}")
+            import traceback
+            print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
+            await interaction.followup.send("모집 공고 채널 설정 중 오류가 발생했습니다.", ephemeral=True)
 
     @app_commands.command(name="모집등록채널설정", description="모집 등록 양식을 게시할 채널을 설정합니다.")
     @app_commands.checks.has_permissions(administrator=True)

@@ -85,7 +85,7 @@ class RecruitmentCard(ui.View):
 
     def _create_max_participants_select(self):
         options = [
-            SelectOption(label=f"최대 {i}명", value=str(i)) for i in range(2, 5)
+            SelectOption(label=f"최대 {i}명 (본인포함)", value=str(i)) for i in range(2, 5)
         ]
         select = ui.Select(
             placeholder="인원 설정",
