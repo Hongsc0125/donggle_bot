@@ -353,10 +353,13 @@ class AuthCog(commands.Cog):
             # 채널 권한 설정 변경
             await channel.set_permissions(
                 interaction.guild.default_role,
-                send_messages=False,  # 일반 메시지 전송 비활성화
+                send_messages=True,  # 메시지 전송 허용 (슬래시 명령어 사용을 위해)
                 read_messages=True,  # 메시지 읽기 허용
                 read_message_history=True  # 메시지 기록 읽기 허용
             )
+            
+            # 슬로우모드 설정 (1시간)
+            await channel.edit(slowmode_delay=3600)  # 3600초 = 1시간
             
             # DB에 저장
             await self.db["settings"].update_one(
@@ -402,7 +405,7 @@ class AuthCog(commands.Cog):
             await interaction.response.send_message(
                 f"환영 채널이 {channel.mention}으로 설정되었습니다.\n"
                 "시스템 메시지가 비활성화되었습니다.\n"
-                "일반 메시지는 막히고 슬래시 명령어만 사용 가능합니다.",
+                "일반 메시지는 1시간 슬로우모드로 제한되며, 슬래시 명령어는 사용 가능합니다.",
                 ephemeral=True
             )
             logger.info(f"서버 {guild_id}의 환영 채널 설정: {channel_id}")
