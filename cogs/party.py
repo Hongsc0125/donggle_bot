@@ -109,18 +109,31 @@ class ChannelSetupView(discord.ui.View):
 
 class PartyCog(commands.Cog):
     def __init__(self, bot):
+        """초기화"""
         self.bot = bot
         self.db = get_database()
-        self.announcement_channels = {}  # 서버별 공고 채널 ID 저장 딕셔너리
-        self.registration_channels = {}  # 서버별 등록 채널 ID 저장 딕셔너리
-        self.registration_locked = False  # 모집 등록 잠금 상태 (5초간)
-        self.dungeons = []  # 던전 목록 추가
+        self.dungeons = []  # 던전 목록 초기화
+        self.registration_channels = {}  # 모집 등록 채널
+        self.announcement_channels = {}  # 모집 공고 채널
+        self.thread_channels = {}  # 스레드 생성 채널
+        self.channel_pairs = {}  # 채널 페어 (등록 채널 ID -> 공고 채널 ID)
+        self.registration_locked = False  # 등록 잠금 상태
+        self.registration_message = None  # 현재 등록 양식 메시지 객체
+        self.initialization_retries = {}  # 초기화 재시도 카운터
+        
+        # 값 로드 (동기 방식)
         self._load_settings_sync()
-        self.cleanup_channel.start()  # 채널 정리 작업 시작
-        self.recruiting_dict = {}  # 모집 정보를 저장할 딕셔너리
-        self.initialization_retries = {}  # 채널 초기화 재시도 카운터
-        # 허용된 길드 ID 목록
-        self.allowed_guild_ids = ["1359541321185886400", "1359677298604900462"]
+        
+        # 정리 작업 시작
+        self.cleanup_channel.start()
+        
+        # 상태 체크 작업 시작
+        self.keep_alive.start()
+        
+        # 모집 등록 양식 갱신 작업 시작
+        self.refresh_registration_forms.start()
+        
+        logger.info("Party cog initialized")
 
     def _load_settings_sync(self):
         """초기 설정을 동기적으로 로드합니다."""
@@ -1061,6 +1074,7 @@ class PartyCog(commands.Cog):
         # 작업 취소
         self.cleanup_channel.cancel()
         self.keep_alive.cancel()  # 새로 추가된 작업 취소
+        self.refresh_registration_forms.cancel()  # 새로 추가된 양식 갱신 작업 취소
         logger.info("Party cog unloaded")
 
     @tasks.loop(minutes=5)  # 5분마다 실행
@@ -2319,6 +2333,107 @@ class PartyCog(commands.Cog):
         else:
             logger.error(f"쓰레드 채널 설정 중 오류: {error}")
             await interaction.response.send_message("명령어 실행 중 오류가 발생했습니다.", ephemeral=True)
+
+    @tasks.loop(minutes=15)  # 15분마다 실행 
+    async def refresh_registration_forms(self):
+        """모집 등록 양식을 주기적으로 갱신합니다."""
+        try:
+            logger.info("모집 등록 양식 갱신 작업 시작...")
+            if not self.registration_channels:
+                logger.info("등록된 모집 등록 채널이 없습니다.")
+                return
+            
+            # 각 서버별로 등록 양식 재생성
+            for guild_id, channel_id in self.registration_channels.items():
+                try:
+                    # 서버 객체 가져오기
+                    guild = self.bot.get_guild(int(guild_id))
+                    if not guild:
+                        logger.warning(f"모집 양식 갱신 - 서버를 찾을 수 없음: {guild_id}")
+                        continue
+                    
+                    # 채널 객체 가져오기
+                    channel = guild.get_channel(int(channel_id))
+                    if not channel:
+                        logger.warning(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널을 찾을 수 없음: {channel_id}")
+                        continue
+                    
+                    # 기존 등록 양식 메시지 찾기 및 삭제
+                    deleted_count = 0
+                    async for message in channel.history(limit=10):
+                        try:
+                            if message.author.id == self.bot.user.id:
+                                await message.delete()
+                                deleted_count += 1
+                        except Exception as e:
+                            logger.error(f"모집 양식 갱신 - 메시지 삭제 중 오류: {e}")
+                    
+                    logger.info(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에서 {deleted_count}개 메시지 삭제")
+                    
+                    # 새 등록 양식 생성
+                    await asyncio.sleep(1)  # 잠시 대기
+                    await self.create_registration_form(channel)
+                    logger.info(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에 새 양식 생성")
+                    
+                except Exception as e:
+                    logger.error(f"모집 양식 갱신 - 서버 {guild_id}의 양식 갱신 중 오류: {e}")
+                    logger.error(traceback.format_exc())
+            
+            logger.info("모집 등록 양식 갱신 작업 완료")
+            
+        except Exception as e:
+            logger.error(f"모집 양식 갱신 작업 중 오류 발생: {e}")
+            logger.error(traceback.format_exc())
+
+    @refresh_registration_forms.before_loop
+    async def before_refresh_registration_forms(self):
+        """양식 갱신 작업 시작 전 실행되는 메서드"""
+        logger.debug("모집 등록 양식 갱신 작업 준비 중...")
+        await self.bot.wait_until_ready()  # 봇이 준비될 때까지 대기
+        logger.debug("모집 등록 양식 갱신 작업 시작")
+
+    @app_commands.command(name="모집_양식_갱신", description="모집 등록 양식을 갱신합니다.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def refresh_registration_form(self, interaction: discord.Interaction):
+        """모집 등록 양식을 갱신하는 명령어"""
+        try:
+            guild_id = str(interaction.guild.id)
+            
+            # 등록된 모집 등록 채널 확인
+            if guild_id not in self.registration_channels:
+                await interaction.response.send_message("모집 등록 채널이 설정되지 않았습니다. 먼저 `/모집등록채널설정` 명령어를 사용해주세요.", ephemeral=True)
+                return
+            
+            channel_id = self.registration_channels[guild_id]
+            channel = interaction.guild.get_channel(int(channel_id))
+            
+            if not channel:
+                await interaction.response.send_message("모집 등록 채널을 찾을 수 없습니다. 다시 `/모집등록채널설정` 명령어를 사용해주세요.", ephemeral=True)
+                return
+            
+            await interaction.response.defer(ephemeral=True)
+            
+            # 기존 등록 양식 메시지 찾기 및 삭제
+            deleted_count = 0
+            async for message in channel.history(limit=10):
+                try:
+                    if message.author.id == self.bot.user.id:
+                        await message.delete()
+                        deleted_count += 1
+                except Exception as e:
+                    logger.error(f"모집 양식 갱신 - 메시지 삭제 중 오류: {e}")
+            
+            # 새 등록 양식 생성
+            await asyncio.sleep(1)  # 잠시 대기
+            await self.create_registration_form(channel)
+            
+            await interaction.followup.send(f"모집 등록 양식이 갱신되었습니다. {deleted_count}개의 이전 양식이 삭제되었습니다.", ephemeral=True)
+            logger.info(f"서버 {guild_id}의 모집 등록 양식 수동 갱신 완료")
+            
+        except Exception as e:
+            logger.error(f"모집 양식 갱신 명령어 실행 중 오류: {e}")
+            logger.error(traceback.format_exc())
+            await interaction.followup.send("모집 등록 양식 갱신 중 오류가 발생했습니다.", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(PartyCog(bot))
