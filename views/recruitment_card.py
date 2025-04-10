@@ -5,6 +5,7 @@ import datetime
 from core.config import settings
 import asyncio
 from bson.objectid import ObjectId
+from core.logger import logger
 
 # 슈퍼유저 ID 정의
 SUPER_USER_ID = "307620267067179019"
@@ -76,10 +77,10 @@ class RecruitmentCard(ui.View):
         register_button.disabled = not button_enabled
         
         # 디버그 로그 추가
-        print(f"[DEBUG] _setup_buttons - 모집 등록 버튼 활성화 상태: {not register_button.disabled}")
-        print(f"[DEBUG] _setup_buttons - 필수값 상태 (각각): type={has_type}, kind={has_kind}, diff={has_diff}, content={has_content}, max_participants={has_max_participants}")
-        print(f"[DEBUG] _setup_buttons - 필수값 상태 (all 함수): {button_enabled}")
-        print(f"[DEBUG] _setup_buttons - 필수값 실제 값: type={self.selected_type}, kind={self.selected_kind}, diff={self.selected_diff}, content_len={len(self.recruitment_content) if self.recruitment_content else 0}, max_participants={self.max_participants}")
+        logger.debug(f"_setup_buttons - 모집 등록 버튼 활성화 상태: {not register_button.disabled}")
+        logger.debug(f"_setup_buttons - 필수값 상태 (각각): type={has_type}, kind={has_kind}, diff={has_diff}, content={has_content}, max_participants={has_max_participants}")
+        logger.debug(f"_setup_buttons - 필수값 상태 (all 함수): {button_enabled}")
+        logger.debug(f"_setup_buttons - 필수값 실제 값: type={self.selected_type}, kind={self.selected_kind}, diff={self.selected_diff}, content_len={len(self.recruitment_content) if self.recruitment_content else 0}, max_participants={self.max_participants}")
         
         self.add_item(register_button)
 
@@ -231,7 +232,7 @@ class RecruitmentCard(ui.View):
                 else:
                     participants_text += f"{i+1}. <@{p_id}> (알 수 없는 사용자)\n"
             except Exception as e:
-                print(f"[ERROR] 참가자 정보 조회 중 오류: {e}")
+                logger.error(f"참가자 정보 조회 중 오류: {e}")
                 participants_text += f"{i+1}. <@{p_id}>\n"
         
         # 참가자 필드 업데이트
@@ -254,8 +255,8 @@ class RecruitmentCard(ui.View):
             
     async def update_embed(self, interaction: discord.Interaction = None):
         # 디버그 로그 추가
-        print(f"[DEBUG] update_embed - 시작")
-        print(f"[DEBUG] update_embed - 현재 상태: type={self.selected_type}, kind={self.selected_kind}, diff={self.selected_diff}, content={bool(self.recruitment_content)}, max_participants={self.max_participants}")
+        logger.debug("update_embed - 시작")
+        logger.debug(f"update_embed - 현재 상태: type={self.selected_type}, kind={self.selected_kind}, diff={self.selected_diff}, content={bool(self.recruitment_content)}, max_participants={self.max_participants}")
         
         try:
             # 모든 UI 요소 제거
@@ -314,12 +315,12 @@ class RecruitmentCard(ui.View):
                 register_button.disabled = not button_enabled
                 
                 # 디버그 로그 추가
-                print(f"[DEBUG] update_embed - 모집 등록 버튼 활성화 상태: {not register_button.disabled}")
-                print(f"[DEBUG] update_embed - 필수값 상태 (각각): type={has_type}, kind={has_kind}, diff={has_diff}, content={has_content}, max_participants={has_max_participants}")
-                print(f"[DEBUG] update_embed - 필수값 상태 (all 함수): {button_enabled}")
+                logger.debug(f"update_embed - 모집 등록 버튼 활성화 상태: {not register_button.disabled}")
+                logger.debug(f"update_embed - 필수값 상태 (각각): type={has_type}, kind={has_kind}, diff={has_diff}, content={has_content}, max_participants={has_max_participants}")
+                logger.debug(f"update_embed - 필수값 상태 (all 함수): {button_enabled}")
                 if self.recruitment_content:
                     content_preview = self.recruitment_content[:30] + "..." if len(self.recruitment_content) > 30 else self.recruitment_content
-                    print(f"[DEBUG] update_embed - 모집 내용 미리보기: {content_preview}")
+                    logger.debug(f"update_embed - 모집 내용 미리보기: {content_preview}")
                 
                 self.add_item(register_button)
             else:
@@ -342,16 +343,16 @@ class RecruitmentCard(ui.View):
             embed = self.get_embed()
             
             # 디버그 로그 추가
-            print(f"[DEBUG] update_embed - 임베드 생성 완료, 메시지 편집 시작")
-            print(f"[DEBUG] update_embed - 선택된 값들: type={self.selected_type}, kind={self.selected_kind}, diff={self.selected_diff}, max_participants={self.max_participants}")
-            print(f"[DEBUG] update_embed - 선택 메뉴 placeholder: type={self.type_select.placeholder}, kind={self.kind_select.placeholder}, diff={self.diff_select.placeholder}, max_participants={self.max_participants_select.placeholder}")
+            logger.debug("update_embed - 임베드 생성 완료, 메시지 편집 시작")
+            logger.debug(f"update_embed - 선택된 값들: type={self.selected_type}, kind={self.selected_kind}, diff={self.selected_diff}, max_participants={self.max_participants}")
+            logger.debug(f"update_embed - 선택 메뉴 placeholder: type={self.type_select.placeholder}, kind={self.kind_select.placeholder}, diff={self.diff_select.placeholder}, max_participants={self.max_participants_select.placeholder}")
             
             await self.message.edit(embed=embed, view=self)
-            print(f"[DEBUG] update_embed - 완료")
+            logger.debug("update_embed - 완료")
         except Exception as e:
-            print(f"[ERROR] update_embed - 메시지 편집 중 오류 발생: {e}")
+            logger.error(f"update_embed - 메시지 편집 중 오류 발생: {e}")
             import traceback
-            print(f"[ERROR] update_embed - 상세 오류: {traceback.format_exc()}")
+            logger.error(f"update_embed - 상세 오류: {traceback.format_exc()}")
     
     async def type_callback(self, interaction: Interaction):
         self.selected_type = interaction.data["values"][0]
@@ -359,8 +360,8 @@ class RecruitmentCard(ui.View):
         self.selected_diff = None
         
         # 디버그 로그 추가
-        print(f"[DEBUG] type_callback - 던전 타입 선택됨: {self.selected_type}")
-        print(f"[DEBUG] type_callback - 종류와 난이도 초기화: kind={self.selected_kind}, diff={self.selected_diff}")
+        logger.debug(f"type_callback - 던전 타입 선택됨: {self.selected_type}")
+        logger.debug(f"type_callback - 종류와 난이도 초기화: kind={self.selected_kind}, diff={self.selected_diff}")
         
         await interaction.response.defer()
         await self.update_embed(interaction)
@@ -370,8 +371,8 @@ class RecruitmentCard(ui.View):
         self.selected_diff = None
         
         # 디버그 로그 추가
-        print(f"[DEBUG] kind_callback - 던전 종류 선택됨: {self.selected_kind}")
-        print(f"[DEBUG] kind_callback - 난이도 초기화: diff={self.selected_diff}")
+        logger.debug(f"kind_callback - 던전 종류 선택됨: {self.selected_kind}")
+        logger.debug(f"kind_callback - 난이도 초기화: diff={self.selected_diff}")
         
         await interaction.response.defer()
         await self.update_embed(interaction)
@@ -380,7 +381,7 @@ class RecruitmentCard(ui.View):
         self.selected_diff = interaction.data["values"][0]
         
         # 디버그 로그 추가
-        print(f"[DEBUG] diff_callback - 난이도 선택됨: {self.selected_diff}")
+        logger.debug(f"diff_callback - 난이도 선택됨: {self.selected_diff}")
         
         await interaction.response.defer()
         await self.update_embed(interaction)
@@ -389,7 +390,7 @@ class RecruitmentCard(ui.View):
         self.max_participants = int(interaction.data["values"][0])
         
         # 디버그 로그 추가
-        print(f"[DEBUG] max_participants_callback - 최대 인원 설정: {self.max_participants}")
+        logger.debug(f"max_participants_callback - 최대 인원 설정: {self.max_participants}")
         
         await interaction.response.defer()
         await self.update_embed(interaction)
@@ -405,13 +406,13 @@ class RecruitmentCard(ui.View):
         """모집 등록 버튼 클릭 시 호출되는 콜백"""
         try:
             # 디버그 로그 추가
-            print(f"[DEBUG] btn_register_callback - 시작")
-            print(f"[DEBUG] btn_register_callback - 필수값 상태: type={bool(self.selected_type)}, kind={bool(self.selected_kind)}, diff={bool(self.selected_diff)}, content={bool(self.recruitment_content)}, max_participants={bool(self.max_participants)}")
-            print(f"[DEBUG] btn_register_callback - 필수값 실제 값: type={self.selected_type}, kind={self.selected_kind}, diff={self.selected_diff}, content_len={len(self.recruitment_content) if self.recruitment_content else 0}, max_participants={self.max_participants}")
+            logger.debug("btn_register_callback - 시작")
+            logger.debug(f"btn_register_callback - 필수값 상태: type={bool(self.selected_type)}, kind={bool(self.selected_kind)}, diff={bool(self.selected_diff)}, content={bool(self.recruitment_content)}, max_participants={bool(self.max_participants)}")
+            logger.debug(f"btn_register_callback - 필수값 실제 값: type={self.selected_type}, kind={self.selected_kind}, diff={self.selected_diff}, content_len={len(self.recruitment_content) if self.recruitment_content else 0}, max_participants={self.max_participants}")
             
             # 필수 정보 확인
             if not all([self.selected_type, self.selected_kind, self.selected_diff, self.recruitment_content, self.max_participants]):
-                print(f"[DEBUG] btn_register_callback - 필수 정보 누락됨, 등록 취소")
+                logger.debug("btn_register_callback - 필수 정보 누락됨, 등록 취소")
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("모든 필수 정보를 입력해주세요.", ephemeral=True)
                 await asyncio.sleep(2)
@@ -463,7 +464,7 @@ class RecruitmentCard(ui.View):
             # PartyCog 인스턴스 가져오기
             party_cog = interaction.client.get_cog("PartyCog")
             if not party_cog:
-                print("[ERROR] PartyCog를 찾을 수 없음")
+                logger.error("PartyCog를 찾을 수 없음")
                 return
             
             # 모집 공고 게시
@@ -491,9 +492,9 @@ class RecruitmentCard(ui.View):
             await party_cog.create_registration_form(interaction.channel)
             
         except Exception as e:
-            print(f"[ERROR] 모집 등록 중 오류 발생: {e}")
+            logger.error(f"모집 등록 중 오류 발생: {e}")
             import traceback
-            print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
+            logger.error(f"상세 오류: {traceback.format_exc()}")
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("모집 등록 중 오류가 발생했습니다.", ephemeral=True)
@@ -547,9 +548,9 @@ class RecruitmentCard(ui.View):
                 self.add_item(cancelled_text)
                 await interaction.message.edit(view=self)
             except Exception as e:
-                print(f"[ERROR] btn_delete_callback - 메시지 편집 오류: {e}")
+                logger.error(f"btn_delete_callback - 메시지 편집 오류: {e}")
                 import traceback
-                print(f"[ERROR] btn_delete_callback - 상세 오류: {traceback.format_exc()}")
+                logger.error(f"btn_delete_callback - 상세 오류: {traceback.format_exc()}")
             
             # 모집 취소 메시지
             await interaction.response.defer(ephemeral=True)
@@ -558,9 +559,9 @@ class RecruitmentCard(ui.View):
             await msg.delete()
             
         except Exception as e:
-            print(f"[ERROR] 모집 취소 중 오류 발생: {e}")
+            logger.error(f"모집 취소 중 오류 발생: {e}")
             import traceback
-            print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
+            logger.error(f"상세 오류: {traceback.format_exc()}")
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("모집 취소 중 오류가 발생했습니다.", ephemeral=True)
@@ -570,11 +571,14 @@ class RecruitmentCard(ui.View):
     async def create_private_thread(self, interaction: discord.Interaction):
         """모집 완료 시 스레드를 생성합니다."""
         try:
-            # 모집자 ID 가져오기
+            # 모집자 ID 가져오기 (첫 번째 참가자가 모집자)
             creator_id = int(self.participants[0]) if self.participants else None
+            
+            logger.debug(f"스레드 생성 시작 - 모집자 ID: {creator_id}, 현재 사용자 ID: {interaction.user.id}")
             
             # 모집자만 스레드 생성 가능
             if interaction.user.id != creator_id:
+                logger.debug("스레드 생성 권한 없음 - 모집자가 아님")
                 if not interaction.response.is_done():
                     await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("모집자만 스레드를 생성할 수 있습니다.", ephemeral=True)
@@ -584,26 +588,50 @@ class RecruitmentCard(ui.View):
             
             # 스레드 이름 생성
             thread_name = f"{self.selected_kind} {self.selected_diff}"
+            logger.debug(f"스레드 이름 생성: {thread_name}")
             
-            # 스레드 생성
-            thread = await interaction.channel.create_thread(
-                name=thread_name,
-                type=discord.ChannelType.public_thread,
-                auto_archive_duration=60  # 기본값 1시간
-            )
+            try:
+                # 스레드 생성
+                thread = await interaction.channel.create_thread(
+                    name=thread_name,
+                    type=discord.ChannelType.public_thread,
+                    auto_archive_duration=60  # 기본값 1시간
+                )
+                logger.debug(f"스레드 생성 성공 - 스레드 ID: {thread.id}")
+            except discord.Forbidden:
+                logger.error("스레드 생성 실패 - 권한 부족")
+                if not interaction.response.is_done():
+                    await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("스레드 생성 권한이 없습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+                return
+            except discord.HTTPException as e:
+                logger.error(f"스레드 생성 실패 - HTTP 오류: {e}")
+                if not interaction.response.is_done():
+                    await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("스레드 생성 중 오류가 발생했습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+                return
             
             # 스레드 ID 저장
             now = datetime.datetime.now().isoformat()
-            await self.db["recruitments"].update_one(
-                {"_id": ObjectId(self.recruitment_id)},
-                {
-                    "$set": {
-                        "thread_id": str(thread.id),
-                        "thread_status": "pending",
-                        "updated_at": now
+            try:
+                await self.db["recruitments"].update_one(
+                    {"_id": ObjectId(self.recruitment_id)},
+                    {
+                        "$set": {
+                            "thread_id": str(thread.id),
+                            "thread_status": "pending",
+                            "updated_at": now
+                        }
                     }
-                }
-            )
+                )
+                logger.debug(f"스레드 정보 DB 저장 성공 - 스레드 ID: {thread.id}")
+            except Exception as e:
+                logger.error(f"스레드 정보 DB 저장 실패: {e}")
+                # DB 저장 실패해도 스레드 생성은 계속 진행
             
             # 스레드 설정용 뷰 생성
             archive_view = ThreadArchiveView(
@@ -623,13 +651,18 @@ class RecruitmentCard(ui.View):
             await asyncio.sleep(2)
             await msg.delete()
             
-            # 스레드에 보관 기간 설정 메시지 전송
-            await thread.send(f"<@{creator_id}> 스레드 보관 기간을 설정해주세요.", view=archive_view)
+            try:
+                # 스레드에 보관 기간 설정 메시지 전송
+                await thread.send(f"<@{creator_id}> 스레드 보관 기간을 설정해주세요.", view=archive_view)
+                logger.debug("스레드 초기 메시지 전송 성공")
+            except Exception as e:
+                logger.error(f"스레드 초기 메시지 전송 실패: {e}")
+                # 메시지 전송 실패해도 스레드 생성은 완료된 것으로 간주
             
         except Exception as e:
-            print(f"스레드 생성 중 오류 발생: {e}")
+            logger.error(f"스레드 생성 중 오류 발생: {e}")
             import traceback
-            print(f"상세 오류: {traceback.format_exc()}")
+            logger.error(f"상세 오류: {traceback.format_exc()}")
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
             msg = await interaction.followup.send("스레드 생성 중 오류가 발생했습니다.", ephemeral=True)
@@ -645,7 +678,7 @@ class RecruitmentCard(ui.View):
             # 모집 정보 가져오기
             recruitment = await self.db["recruitments"].find_one({"_id": ObjectId(self.recruitment_id)})
             if not recruitment:
-                print(f"[ERROR] 모집 정보를 찾을 수 없음: {self.recruitment_id}")
+                logger.error(f"모집 정보를 찾을 수 없음: {self.recruitment_id}")
                 msg = await interaction.followup.send("모집 정보를 찾을 수 없습니다.", ephemeral=True)
                 await asyncio.sleep(2)
                 await msg.delete()
@@ -676,7 +709,7 @@ class RecruitmentCard(ui.View):
                 await msg.delete()
                 return
             
-            # 최대 인원 초과 확인 (슈퍼유저도 인원 제한 적용)
+            # 최대 인원 초과 확인
             current_participants = len(self.participants)
             if current_participants >= self.max_participants:
                 msg = await interaction.followup.send(f"모집 인원이 마감되었습니다. (최대 {self.max_participants}명)", ephemeral=True)
@@ -759,16 +792,16 @@ class RecruitmentCard(ui.View):
                         await self.create_private_thread(interaction)
                     else:
                         # 이미 완료 상태인 경우
-                        print(f"[INFO] 모집 ID {self.recruitment_id}는 이미 완료 상태입니다.")
+                        logger.info(f"모집 ID {self.recruitment_id}는 이미 완료 상태입니다.")
             else:
                 msg = await interaction.followup.send("이미 참가 신청하셨습니다.", ephemeral=True)
                 await asyncio.sleep(2)
                 await msg.delete()
             
         except Exception as e:
-            print(f"[ERROR] 참가 신청 중 오류 발생: {e}")
+            logger.error(f"참가 신청 중 오류 발생: {e}")
             import traceback
-            print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
+            logger.error(f"상세 오류: {traceback.format_exc()}")
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
             msg = await interaction.followup.send("참가 신청 중 오류가 발생했습니다.", ephemeral=True)
@@ -781,7 +814,7 @@ class RecruitmentCard(ui.View):
             # 모집 정보 가져오기
             recruitment = await self.db["recruitments"].find_one({"_id": ObjectId(self.recruitment_id)})
             if not recruitment:
-                print(f"[ERROR] 모집 정보를 찾을 수 없음: {self.recruitment_id}")
+                logger.error(f"모집 정보를 찾을 수 없음: {self.recruitment_id}")
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("모집 정보를 찾을 수 없습니다.", ephemeral=True)
                 await asyncio.sleep(2)
@@ -842,9 +875,9 @@ class RecruitmentCard(ui.View):
             await msg.delete()
             
         except Exception as e:
-            print(f"[ERROR] 참가 취소 중 오류 발생: {e}")
+            logger.error(f"참가 취소 중 오류 발생: {e}")
             import traceback
-            print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
+            logger.error(f"상세 오류: {traceback.format_exc()}")
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("참가 취소 중 오류가 발생했습니다.", ephemeral=True)
@@ -910,7 +943,7 @@ class ThreadArchiveView(discord.ui.View):
         self.thread_status = "pending"  # pending, active, archived
         
         # 보관 기간 선택 버튼 추가
-        self.add_item(ThreadArchiveButton(60, "1시간 (테스트용)"))
+        self.add_item(ThreadArchiveButton(60, "1시간"))
         self.add_item(ThreadArchiveButton(1440, "1일"))
         self.add_item(ThreadArchiveButton(4320, "3일"))
         self.add_item(ThreadArchiveButton(10080, "7일"))
@@ -934,7 +967,7 @@ class ThreadArchiveView(discord.ui.View):
             # 응답 메시지
             if duration_minutes == 60:
                 await interaction.response.defer(ephemeral=True)
-                msg = await interaction.followup.send("스레드 보관 기간이 1시간으로 설정되었습니다. (테스트용)")
+                msg = await interaction.followup.send("스레드 보관 기간이 1시간으로 설정되었습니다.")
                 await asyncio.sleep(2)
                 await msg.delete()
             else:
@@ -1010,9 +1043,9 @@ class ThreadArchiveView(discord.ui.View):
                 await thread.send("파티원분들은 스레드에 참가해주세요!")
             
         except Exception as e:
-            print(f"스레드 보관 기간 설정 중 오류 발생: {e}")
+            logger.error(f"스레드 보관 기간 설정 중 오류 발생: {e}")
             import traceback
-            print(f"상세 오류: {traceback.format_exc()}")
+            logger.error(f"상세 오류: {traceback.format_exc()}")
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send(f"스레드 보관 기간 설정 중 오류가 발생했습니다: {e}", ephemeral=True)

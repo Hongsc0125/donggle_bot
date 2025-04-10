@@ -397,7 +397,7 @@ class ThreadArchiveView(discord.ui.View):
         self.thread_status = "pending"  # pending, active, archived
         
         # 보관 기간 선택 버튼 추가
-        self.add_item(ThreadArchiveButton(60, "1시간 (테스트용)"))
+        self.add_item(ThreadArchiveButton(60, "1시간"))
         self.add_item(ThreadArchiveButton(1440, "1일"))
         self.add_item(ThreadArchiveButton(4320, "3일"))
         self.add_item(ThreadArchiveButton(10080, "7일"))
