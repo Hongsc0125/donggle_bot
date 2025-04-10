@@ -2365,22 +2365,48 @@ class PartyCog(commands.Cog):
                         logger.warning(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널을 찾을 수 없음: {channel_id}")
                         continue
                     
-                    # 기존 등록 양식 메시지 찾기 및 삭제
-                    deleted_count = 0
-                    async for message in channel.history(limit=10):
+                    # 채널 메시지 일괄 삭제 시도 (2주 이내 메시지만 가능)
+                    try:
+                        # 일괄 삭제 시도
+                        deleted = await channel.purge(limit=50, check=lambda m: m.author.id == self.bot.user.id)
+                        deleted_count = len(deleted)
+                        logger.info(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에서 {deleted_count}개 메시지 일괄 삭제 성공")
+                    except Exception as bulk_error:
+                        # 일괄 삭제 실패 시 개별 삭제 시도
+                        logger.warning(f"모집 양식 갱신 - 일괄 삭제 실패, 개별 삭제 시도: {bulk_error}")
+                        deleted_count = 0
                         try:
-                            if message.author.id == self.bot.user.id:
-                                await message.delete()
-                                deleted_count += 1
+                            async for message in channel.history(limit=30):
+                                if message.author.id == self.bot.user.id:
+                                    try:
+                                        await message.delete()
+                                        deleted_count += 1
+                                        await asyncio.sleep(0.5)  # API 속도 제한 방지
+                                    except Exception as e:
+                                        logger.error(f"모집 양식 갱신 - 메시지 삭제 중 오류: {e}")
+                            logger.info(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에서 {deleted_count}개 메시지 개별 삭제")
                         except Exception as e:
-                            logger.error(f"모집 양식 갱신 - 메시지 삭제 중 오류: {e}")
+                            logger.error(f"모집 양식 갱신 - 채널 히스토리 조회 중 오류: {e}")
                     
-                    logger.info(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에서 {deleted_count}개 메시지 삭제")
+                    # 새 등록 양식 생성 전 잠시 대기
+                    await asyncio.sleep(2)  # 삭제 후 생성 간 충분한 대기 시간 확보
                     
                     # 새 등록 양식 생성
-                    await asyncio.sleep(1)  # 잠시 대기
-                    await self.create_registration_form(channel)
-                    logger.info(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에 새 양식 생성")
+                    try:
+                        new_form = await self.create_registration_form(channel)
+                        if new_form:
+                            logger.info(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에 새 양식 생성 성공 (메시지 ID: {new_form.id})")
+                            await interaction.followup.send(f"모집 등록 양식이 갱신되었습니다. {deleted_count}개의 이전 양식이 삭제되었습니다.", ephemeral=True)
+                        else:
+                            logger.error(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에 새 양식 생성 실패 (반환값 없음)")
+                            await interaction.followup.send("모집 등록 양식 갱신이 완료되었으나, 새 양식 생성에 문제가 있을 수 있습니다.", ephemeral=True)
+                    except Exception as form_error:
+                        logger.error(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에 새 양식 생성 중 오류: {form_error}")
+                        logger.error(traceback.format_exc())
+                        await interaction.followup.send("모집 등록 양식 갱신 중 오류가 발생했습니다. 관리자에게 문의하세요.", ephemeral=True)
+                        return
+                    
+                    logger.info(f"서버 {guild_id}의 모집 등록 양식 수동 갱신 완료")
                     
                 except Exception as e:
                     logger.error(f"모집 양식 갱신 - 서버 {guild_id}의 양식 갱신 중 오류: {e}")
@@ -2420,21 +2446,47 @@ class PartyCog(commands.Cog):
             
             await interaction.response.defer(ephemeral=True)
             
-            # 기존 등록 양식 메시지 찾기 및 삭제
-            deleted_count = 0
-            async for message in channel.history(limit=10):
+            # 채널 메시지 일괄 삭제 시도 (2주 이내 메시지만 가능)
+            try:
+                # 일괄 삭제 시도
+                deleted = await channel.purge(limit=50, check=lambda m: m.author.id == self.bot.user.id)
+                deleted_count = len(deleted)
+                logger.info(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에서 {deleted_count}개 메시지 일괄 삭제 성공")
+            except Exception as bulk_error:
+                # 일괄 삭제 실패 시 개별 삭제 시도
+                logger.warning(f"모집 양식 갱신 - 일괄 삭제 실패, 개별 삭제 시도: {bulk_error}")
+                deleted_count = 0
                 try:
-                    if message.author.id == self.bot.user.id:
-                        await message.delete()
-                        deleted_count += 1
+                    async for message in channel.history(limit=30):
+                        if message.author.id == self.bot.user.id:
+                            try:
+                                await message.delete()
+                                deleted_count += 1
+                                await asyncio.sleep(0.5)  # API 속도 제한 방지
+                            except Exception as e:
+                                logger.error(f"모집 양식 갱신 - 메시지 삭제 중 오류: {e}")
+                    logger.info(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에서 {deleted_count}개 메시지 개별 삭제")
                 except Exception as e:
-                    logger.error(f"모집 양식 갱신 - 메시지 삭제 중 오류: {e}")
+                    logger.error(f"모집 양식 갱신 - 채널 히스토리 조회 중 오류: {e}")
+            
+            # 새 등록 양식 생성 전 잠시 대기
+            await asyncio.sleep(2)  # 삭제 후 생성 간 충분한 대기 시간 확보
             
             # 새 등록 양식 생성
-            await asyncio.sleep(1)  # 잠시 대기
-            await self.create_registration_form(channel)
+            try:
+                new_form = await self.create_registration_form(channel)
+                if new_form:
+                    logger.info(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에 새 양식 생성 성공 (메시지 ID: {new_form.id})")
+                    await interaction.followup.send(f"모집 등록 양식이 갱신되었습니다. {deleted_count}개의 이전 양식이 삭제되었습니다.", ephemeral=True)
+                else:
+                    logger.error(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에 새 양식 생성 실패 (반환값 없음)")
+                    await interaction.followup.send("모집 등록 양식 갱신이 완료되었으나, 새 양식 생성에 문제가 있을 수 있습니다.", ephemeral=True)
+            except Exception as form_error:
+                logger.error(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에 새 양식 생성 중 오류: {form_error}")
+                logger.error(traceback.format_exc())
+                await interaction.followup.send("모집 등록 양식 갱신 중 오류가 발생했습니다. 관리자에게 문의하세요.", ephemeral=True)
+                return
             
-            await interaction.followup.send(f"모집 등록 양식이 갱신되었습니다. {deleted_count}개의 이전 양식이 삭제되었습니다.", ephemeral=True)
             logger.info(f"서버 {guild_id}의 모집 등록 양식 수동 갱신 완료")
             
         except Exception as e:
