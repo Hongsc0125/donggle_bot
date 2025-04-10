@@ -10,6 +10,25 @@ from core.logger import logger
 # 슈퍼유저 ID 정의
 SUPER_USER_ID = "307620267067179019"
 
+class CreatorOnlyButton(ui.Button):
+    """모집 생성자에게만 보이는 버튼 클래스"""
+    def __init__(self, label, style, custom_id, callback, creator_id, row=0):
+        super().__init__(label=label, style=style, custom_id=custom_id, row=row)
+        self.creator_id = creator_id
+        self.real_callback = callback
+    
+    async def callback(self, interaction: discord.Interaction):
+        # 모집 생성자인지 확인
+        if interaction.user.id != self.creator_id:
+            await interaction.response.defer(ephemeral=True)
+            msg = await interaction.followup.send("모집 생성자만 이 버튼을 사용할 수 있습니다.", ephemeral=True)
+            await asyncio.sleep(2)
+            await msg.delete()
+            return
+        
+        # 실제 콜백 함수 호출
+        await self.real_callback(interaction)
+
 class RecruitmentCard(ui.View):
     def __init__(self, dungeons, db):
         super().__init__(timeout=None)
@@ -256,7 +275,6 @@ class RecruitmentCard(ui.View):
     async def update_embed(self, interaction: discord.Interaction = None):
         # 디버그 로그 추가
         logger.debug("update_embed - 시작")
-        logger.debug(f"update_embed - 현재 상태: type={self.selected_type}, kind={self.selected_kind}, diff={self.selected_diff}, content={bool(self.recruitment_content)}, max_participants={self.max_participants}")
         
         try:
             # 모든 UI 요소 제거
@@ -333,11 +351,16 @@ class RecruitmentCard(ui.View):
                 cancel_button.callback = self.btn_cancel_callback
                 self.add_item(cancel_button)
                 
-                # 모집 생성자에게만 모집 취소 버튼 표시 (이 버튼은 row 4에 추가)
-                if interaction and interaction.user.id == self.creator_id:
-                    delete_button = ui.Button(label="모집 취소", style=discord.ButtonStyle.danger, custom_id="btn_delete", row=4)
-                    delete_button.callback = self.btn_delete_callback
-                    self.add_item(delete_button)
+                # 모집 취소 버튼 (모집자에게만 보이는 버튼으로 변경)
+                delete_button = CreatorOnlyButton(
+                    label="모집 취소",
+                    style=discord.ButtonStyle.danger,
+                    custom_id="btn_delete",
+                    callback=self.btn_delete_callback,
+                    creator_id=self.creator_id,
+                    row=4
+                )
+                self.add_item(delete_button)
             
             # 임베드 업데이트
             embed = self.get_embed()
@@ -504,7 +527,8 @@ class RecruitmentCard(ui.View):
     async def btn_delete_callback(self, interaction: discord.Interaction):
         """모집 취소 버튼 콜백"""
         try:
-            # 모집 생성자만 취소 가능
+            # 참고: 버튼 클래스(CreatorOnlyButton)에서 이미 모집자 검증을 했으므로 여기서는 생략 가능
+            # 하지만 다른 경로로도 콜백이 호출될 수 있으므로 여기서도 검증 유지
             if interaction.user.id != self.creator_id:
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("모집 생성자만 취소할 수 있습니다.", ephemeral=True)

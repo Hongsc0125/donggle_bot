@@ -1,6 +1,6 @@
 from discord.ext import commands, tasks
 from database.session import get_database
-from views.recruitment_card import RecruitmentCard
+from views.recruitment_card import RecruitmentCard, CreatorOnlyButton
 from core.config import settings
 import discord
 from discord import app_commands
@@ -372,8 +372,14 @@ class PartyCog(commands.Cog):
                     
                     # 모집 생성자에게만 모집 취소 버튼 표시 (row 1)
                     if view.creator_id:
-                        delete_button = discord.ui.Button(label="모집 취소", style=discord.ButtonStyle.danger, custom_id="btn_delete", row=1)
-                        delete_button.callback = view.btn_delete_callback
+                        delete_button = CreatorOnlyButton(
+                            label="모집 취소", 
+                            style=discord.ButtonStyle.danger, 
+                            custom_id="btn_delete", 
+                            callback=view.btn_delete_callback,
+                            creator_id=view.creator_id,
+                            row=1
+                        )
                         view.add_item(delete_button)
                     
                     # 임베드 생성
@@ -555,8 +561,14 @@ class PartyCog(commands.Cog):
                                         
                                         # 모집 생성자에게만 모집 취소 버튼 표시 (row 1)
                                         if view.creator_id:
-                                            delete_button = discord.ui.Button(label="모집 취소", style=discord.ButtonStyle.danger, custom_id="btn_delete", row=1)
-                                            delete_button.callback = view.btn_delete_callback
+                                            delete_button = CreatorOnlyButton(
+                                                label="모집 취소", 
+                                                style=discord.ButtonStyle.danger, 
+                                                custom_id="btn_delete", 
+                                                callback=view.btn_delete_callback,
+                                                creator_id=view.creator_id,
+                                                row=1
+                                            )
                                             view.add_item(delete_button)
                                         
                                         # 임베드 생성
@@ -620,8 +632,14 @@ class PartyCog(commands.Cog):
                                         
                                         # 모집 생성자에게만 모집 취소 버튼 표시 (row 1)
                                         if view.creator_id:
-                                            delete_button = discord.ui.Button(label="모집 취소", style=discord.ButtonStyle.danger, custom_id="btn_delete", row=1)
-                                            delete_button.callback = announcement_view.btn_delete_callback
+                                            delete_button = CreatorOnlyButton(
+                                                label="모집 취소", 
+                                                style=discord.ButtonStyle.danger, 
+                                                custom_id="btn_delete", 
+                                                callback=announcement_view.btn_delete_callback,
+                                                creator_id=view.creator_id,
+                                                row=1
+                                            )
                                             announcement_view.add_item(delete_button)
                                         
                                         # 임베드 생성
@@ -893,8 +911,14 @@ class PartyCog(commands.Cog):
             
             # 모집 생성자에게만 모집 취소 버튼 표시 (row 1)
             if view.creator_id:
-                delete_button = discord.ui.Button(label="모집 취소", style=discord.ButtonStyle.danger, custom_id="btn_delete", row=1)
-                delete_button.callback = announcement_view.btn_delete_callback
+                delete_button = CreatorOnlyButton(
+                    label="모집 취소", 
+                    style=discord.ButtonStyle.danger, 
+                    custom_id="btn_delete", 
+                    callback=announcement_view.btn_delete_callback,
+                    creator_id=view.creator_id,
+                    row=1
+                )
                 announcement_view.add_item(delete_button)
             
             # 임베드 생성
