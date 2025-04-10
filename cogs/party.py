@@ -195,6 +195,13 @@ class PartyCog(commands.Cog):
             logger.info(f"모집 등록 채널 ID 목록을 로드했습니다: {self.registration_channels}")
             logger.info(f"채널 페어 관계를 로드했습니다: {self.channel_pairs}")
             
+            # 허용된 길드 ID 설정 - 특정 두 개의 길드만 허용
+            self.allowed_guild_ids = {
+                "1359541321185886400": True,
+                "1359677298604900462": True
+            }
+            logger.info(f"허용된 길드 ID 목록을 설정했습니다: {self.allowed_guild_ids}")
+            
             # 각 서버별로 등록 채널 초기화
             for guild_id, channel_id in self.registration_channels.items():
                 try:
