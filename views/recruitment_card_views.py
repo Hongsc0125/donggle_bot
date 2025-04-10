@@ -31,10 +31,6 @@ class RecruitmentModal(ui.Modal, title="모집 내용 작성"):
             # 부모 뷰 업데이트
             await self.parent.update_embed(interaction)
             
-            # 임시 메시지 (알림 없음)
-            msg = await interaction.followup.send("모집 내용이 저장되었습니다.", ephemeral=True)
-            await asyncio.sleep(2)  # 2초 후 메시지 자동 삭제
-            await msg.delete()
             
         except Exception as e:
             print(f"[ERROR] 모집 내용 저장 중 오류 발생: {e}")
@@ -555,3 +551,118 @@ class ThreadArchiveView(discord.ui.View):
             import traceback
             print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
             await interaction.followup.send("스레드 보관 기간 설정 중 오류가 발생했습니다.", ephemeral=True)
+
+    async def force_cleanup_channel(self, guild_id, channel_id):
+        """특정 채널의 완료된 모집 메시지를 강제로 삭제합니다."""
+        try:
+            # 서버 객체 가져오기
+            guild = self.bot.get_guild(int(guild_id))
+            if not guild:
+                logger.warning(f"서버를 찾을 수 없음: {guild_id}")
+                return
+            
+            # 채널 객체 가져오기
+            channel = guild.get_channel(int(channel_id))
+            if not channel:
+                logger.warning(f"서버 {guild_id}의 공고 채널을 찾을 수 없음: {channel_id}")
+                return
+            
+            # 서버별 모집 정보 조회 (완료/취소 상태만)
+            completed_recruitments = await self.db.recruitments.find({
+                "guild_id": guild_id, 
+                "status": {"$in": ["complete", "cancelled"]}
+            }).to_list(None)
+            
+            if not completed_recruitments:
+                logger.info(f"서버 {guild_id}에 완료/취소된 모집이 없습니다.")
+                return
+            
+            logger.info(f"서버 {guild_id}에서 {len(completed_recruitments)}개의 완료/취소된 모집을 찾았습니다.")
+            
+            # 1. 먼저 메시지 ID가 있는 완료 모집 처리 (더 효율적)
+            message_id_map = {}
+            completed_recruitment_ids = set()
+            
+            for recruitment in completed_recruitments:
+                recruitment_id = str(recruitment.get('_id'))
+                completed_recruitment_ids.add(recruitment_id)
+                
+                if "announcement_message_id" in recruitment and "announcement_channel_id" in recruitment:
+                    # 이 채널에 있는 메시지만 처리
+                    if recruitment["announcement_channel_id"] == str(channel_id):
+                        message_id_map[recruitment["announcement_message_id"]] = recruitment_id
+            
+            # 메시지 ID로 삭제 시도
+            deleted_count = 0
+            for message_id, recruitment_id in message_id_map.items():
+                try:
+                    logger.info(f"메시지 ID로 삭제 시도: {message_id}, 모집 ID: {recruitment_id}")
+                    message = await channel.fetch_message(int(message_id))
+                    await message.delete()
+                    logger.info(f"서버 {guild_id}의 완료된 모집 ID {recruitment_id} 메시지가 성공적으로 삭제됨 (메시지 ID 매칭)")
+                    deleted_count += 1
+                except discord.NotFound:
+                    logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}의 메시지를 찾을 수 없음: {message_id}")
+                except Exception as e:
+                    logger.error(f"메시지 삭제 중 오류: {e}")
+            
+            # 2. 메시지 ID로 삭제되지 않은 모집은 내용 검사로 시도
+            messages_to_check = []
+            async for message in channel.history(limit=100):
+                messages_to_check.append(message)
+            
+            logger.info(f"서버 {guild_id}의 공고 채널에서 {len(messages_to_check)}개의 메시지를 확인합니다.")
+            
+            for message in messages_to_check:
+                try:
+                    # 이미 삭제된 메시지 ID는 건너뛰기
+                    if str(message.id) in message_id_map:
+                        continue
+                    
+                    # 메시지에 임베드가 없으면 건너뛰기
+                    if not message.embeds or len(message.embeds) == 0:
+                        continue
+                    
+                    embed = message.embeds[0]
+                    
+                    # 임베드에서 모집 ID 찾기
+                    recruitment_id = None
+                    
+                    # 임베드의 푸터에서 모집 ID 찾기
+                    if embed.footer and embed.footer.text:
+                        footer_text = embed.footer.text
+                        
+                        if "모집 ID:" in footer_text:
+                            # 정규식으로 모집 ID 추출
+                            import re
+                            # MongoDB ObjectID 형식(24자 16진수)에 맞는 패턴
+                            id_match = re.search(r"모집 ID:\s*([a-f0-9]{24})", footer_text)
+                            if id_match:
+                                recruitment_id = id_match.group(1).strip()
+                                logger.info(f"푸터에서 모집 ID를 추출했습니다: {recruitment_id}")
+                    
+                    # 임베드의 필드에서 모집 ID 찾기 (이전 방식 호환)
+                    if not recruitment_id:
+                        for field in embed.fields:
+                            if field.name == "모집 ID":
+                                recruitment_id = field.value.strip()
+                                logger.info(f"필드에서 모집 ID를 추출했습니다: {recruitment_id}")
+                                break
+                    
+                    if recruitment_id and recruitment_id in completed_recruitment_ids:
+                        logger.info(f"서버 {guild_id}의 완료된 모집 ID {recruitment_id} 메시지 삭제 시도 (내용 매칭)")
+                        try:
+                            await message.delete()
+                            deleted_count += 1
+                            logger.info(f"서버 {guild_id}의 완료된 모집 ID {recruitment_id} 메시지가 성공적으로 삭제됨 (내용 매칭)")
+                        except Exception as delete_error:
+                            logger.error(f"메시지 삭제 중 오류: {delete_error}")
+                except Exception as e:
+                    logger.error(f"메시지 처리 중 오류 발생: {e}")
+                    continue
+            
+            logger.info(f"서버 {guild_id}의 강제 채널 정리 완료: {deleted_count}개의 메시지가 삭제되었습니다.")
+            
+        except Exception as e:
+            logger.error(f"강제 채널 정리 중 오류 발생: {e}")
+            logger.error(traceback.format_exc())
