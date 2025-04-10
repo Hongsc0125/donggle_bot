@@ -354,7 +354,6 @@ class AuthCog(commands.Cog):
             await channel.set_permissions(
                 interaction.guild.default_role,
                 send_messages=False,  # 일반 메시지 전송 비활성화
-                use_slash_commands=True,  # 슬래시 명령어 사용 허용
                 read_messages=True,  # 메시지 읽기 허용
                 read_message_history=True  # 메시지 기록 읽기 허용
             )
