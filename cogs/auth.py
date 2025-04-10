@@ -353,7 +353,8 @@ class AuthCog(commands.Cog):
             # 채널 권한 설정 변경
             await channel.set_permissions(
                 interaction.guild.default_role,
-                send_messages=False,  # 일반 사용자 메시지 전송 비활성화
+                send_messages=False,  # 일반 메시지 전송 비활성화
+                use_slash_commands=True,  # 슬래시 명령어 사용 허용
                 read_messages=True,  # 메시지 읽기 허용
                 read_message_history=True  # 메시지 기록 읽기 허용
             )
@@ -368,10 +369,41 @@ class AuthCog(commands.Cog):
             # 캐시 업데이트
             self.welcome_channels[guild_id] = channel_id
             
+            # 기존 메시지 삭제
+            try:
+                await channel.purge(limit=None)
+            except Exception as e:
+                logger.error(f"기존 메시지 삭제 중 오류 발생: {e}")
+            
+            # 고정 환영 메시지 전송
+            embed = discord.Embed(
+                title="서버 이용 안내",
+                description=(
+                    "서버 이용을 위해 다음 권한을 설정해주세요:\n\n"
+                    "1. **서버 권한** - 서버 내 활동을 위한 기본 권한\n"
+                    "2. **직업 권한** - 파티 모집 시 필요한 직업 정보\n"
+                    "3. **닉네임 권한** - 서버 내 표시될 닉네임\n\n"
+                    "권한 설정 방법:\n"
+                    "1. `/권한` 명령어를 사용하여 권한 설정 메뉴를 열어주세요\n"
+                    "2. 각 항목별로 필요한 정보를 입력해주세요\n"
+                    "3. 모든 권한이 설정되면 서버의 모든 기능을 이용할 수 있습니다\n\n"
+                    "※ 이 채널에서는 일반 메시지를 보낼 수 없으며, 슬래시 명령어만 사용 가능합니다."
+                ),
+                color=discord.Color.blue()
+            )
+            
+            # 메시지 전송 및 고정
+            try:
+                message = await channel.send(embed=embed)
+                await message.pin()
+                logger.info(f"서버 {guild_id}의 환영 채널에 고정 메시지 설정")
+            except Exception as e:
+                logger.error(f"고정 메시지 설정 중 오류 발생: {e}")
+            
             await interaction.response.send_message(
                 f"환영 채널이 {channel.mention}으로 설정되었습니다.\n"
                 "시스템 메시지가 비활성화되었습니다.\n"
-                "일반 사용자는 메시지를 보낼 수 없습니다.",
+                "일반 메시지는 막히고 슬래시 명령어만 사용 가능합니다.",
                 ephemeral=True
             )
             logger.info(f"서버 {guild_id}의 환영 채널 설정: {channel_id}")
