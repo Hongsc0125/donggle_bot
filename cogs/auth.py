@@ -291,7 +291,7 @@ class AuthCog(commands.Cog):
             logger.error(f"AuthCog: 명령어 트리 동기화 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
     
-    @app_commands.command(name="명령어동기화", description="봇의 모든 슬래시 명령어를 동기화합니다.")
+    @app_commands.command(name="권한_명령어동기화", description="봇의 모든 슬래시 명령어를 동기화합니다.")
     @app_commands.checks.has_permissions(administrator=True)
     async def sync_commands(self, interaction: discord.Interaction):
         """명령어를 강제로 동기화하는 명령어"""

@@ -426,76 +426,62 @@ class RecruitmentCard(ui.View):
         # 모달 제출 후 버튼 상태가 RecruitmentModal에서 업데이트됨
 
     async def btn_register_callback(self, interaction: discord.Interaction):
-        """모집 등록 버튼 클릭 시 호출되는 콜백"""
+        """모집 등록 버튼 콜백"""
         try:
-            # 디버그 로그 추가
-            logger.debug("btn_register_callback - 시작")
-            logger.debug(f"btn_register_callback - 필수값 상태: type={bool(self.selected_type)}, kind={bool(self.selected_kind)}, diff={bool(self.selected_diff)}, content={bool(self.recruitment_content)}, max_participants={bool(self.max_participants)}")
-            logger.debug(f"btn_register_callback - 필수값 실제 값: type={self.selected_type}, kind={self.selected_kind}, diff={self.selected_diff}, content_len={len(self.recruitment_content) if self.recruitment_content else 0}, max_participants={self.max_participants}")
-            
-            # 필수 정보 확인
-            if not all([self.selected_type, self.selected_kind, self.selected_diff, self.recruitment_content, self.max_participants]):
-                logger.debug("btn_register_callback - 필수 정보 누락됨, 등록 취소")
-                await interaction.response.defer(ephemeral=True)
-                msg = await interaction.followup.send("모든 필수 정보를 입력해주세요.", ephemeral=True)
-                await asyncio.sleep(2)
-                await msg.delete()
-                return
-            
-            # 모집 상태 변경
-            self.status = "active"
-            self.creator_id = int(interaction.user.id)
-            
-            # 생성자를 참가자 목록에 추가
-            self.participants = [self.creator_id]
-            
-            # 모집 데이터 생성
+            # 모집 정보 생성
             recruitment_data = {
-                "type": self.selected_type,
-                "dungeon": self.selected_kind,
-                "difficulty": self.selected_diff,
-                "description": self.recruitment_content,
+                "dungeon_type": self.selected_type,
+                "dungeon_kind": self.selected_kind,
+                "dungeon_difficulty": self.selected_diff,
                 "max_participants": self.max_participants,
-                "participants": [str(p) for p in self.participants],
-                "creator_id": str(self.creator_id),
-                "status": self.status,
-                "guild_id": str(interaction.guild_id),
+                "content": self.recruitment_content,
+                "creator_id": str(interaction.user.id),
+                "creator_name": interaction.user.display_name,
+                "participants": [str(interaction.user.id)],
+                "status": "active",
+                "registration_channel_id": str(interaction.channel.id),
+                "guild_id": str(interaction.guild.id),
                 "created_at": datetime.datetime.now().isoformat(),
                 "updated_at": datetime.datetime.now().isoformat()
             }
             
-            # DB에 저장
-            result = await self.db["recruitments"].insert_one(recruitment_data)
-            self.recruitment_id = str(result.inserted_id)
+            # 공지 전송 준비
+            from cogs.party import PartyCog
+            party_cog = None
             
-            # 임베드 업데이트
-            embed = self.get_embed()
-            await interaction.message.edit(embed=embed, view=self)
+            # PartyCog 찾기
+            for cog in interaction.client.cogs.values():
+                if isinstance(cog, PartyCog):
+                    party_cog = cog
+                    break
             
-            # 등록 완료 메시지 (알림 없음)
-            await interaction.response.defer(ephemeral=True)
-            msg = await interaction.followup.send("모집이 등록되었습니다.", ephemeral=True)
-            await asyncio.sleep(2)
-            await msg.delete()
-            
-            # 등록 양식 메시지 삭제
-            try:
-                await interaction.message.delete()
-            except:
-                pass
-            
-            # PartyCog 인스턴스 가져오기
-            party_cog = interaction.client.get_cog("PartyCog")
             if not party_cog:
-                logger.error("PartyCog를 찾을 수 없음")
+                logger.error("PartyCog를 찾을 수 없습니다.")
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("모집 등록 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
                 return
             
-            # 모집 공고 게시
+            # DB에 모집 정보 저장
+            result = await self.db["recruitments"].insert_one(recruitment_data)
+            self.recruitment_id = str(result.inserted_id)
+            logger.info(f"새 모집 등록: {self.recruitment_id}")
+            
+            # 참가자 목록 초기화 (모집자가 첫 번째 참가자)
+            self.participants = [str(interaction.user.id)]
+            self.creator_id = str(interaction.user.id)
+            
+            # 공고 전송
             announcement_message = await party_cog.post_recruitment_announcement(
-                interaction.guild_id,
+                str(interaction.guild.id), 
                 recruitment_data,
                 self
             )
+            
+            # 임시 성공 메시지 전송
+            await interaction.response.defer(ephemeral=True)
+            msg = await interaction.followup.send("모집이 등록되었습니다!", ephemeral=True)
             
             if announcement_message:
                 # 공고 메시지 정보 저장
@@ -509,6 +495,12 @@ class RecruitmentCard(ui.View):
                         }
                     }
                 )
+            
+            # 등록 양식 메시지 삭제
+            try:
+                await interaction.message.delete()
+            except:
+                pass
             
             # 5초 후 새 등록 양식 생성
             await asyncio.sleep(5)
