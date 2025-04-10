@@ -322,6 +322,15 @@ class AuthCog(commands.Cog):
             guild_id = str(interaction.guild.id)
             channel_id = str(channel.id)
             
+            # 채널 설정 변경
+            await channel.edit(
+                system_channel_flags=discord.SystemChannelFlags(
+                    join_notifications=False,  # 입장 알림 비활성화
+                    premium_subscriptions=False,  # 부스트 알림 비활성화
+                    guild_reminder_notifications=False  # 서버 알림 비활성화
+                )
+            )
+            
             # DB에 저장
             await self.db["settings"].update_one(
                 {"guild_id": guild_id},
@@ -332,7 +341,7 @@ class AuthCog(commands.Cog):
             # 캐시 업데이트
             self.welcome_channels[guild_id] = channel_id
             
-            await interaction.response.send_message(f"환영 채널이 {channel.mention}으로 설정되었습니다.", ephemeral=True)
+            await interaction.response.send_message(f"환영 채널이 {channel.mention}으로 설정되었습니다.\n시스템 메시지가 비활성화되었습니다.", ephemeral=True)
             logger.info(f"서버 {guild_id}의 환영 채널 설정: {channel_id}")
         except Exception as e:
             logger.error(f"환영 채널 설정 중 오류 발생: {e}")
