@@ -574,17 +574,7 @@ class RecruitmentCard(ui.View):
             # 모집자 ID 가져오기 (첫 번째 참가자가 모집자)
             creator_id = int(self.participants[0]) if self.participants else None
             
-            logger.debug(f"스레드 생성 시작 - 모집자 ID: {creator_id}, 현재 사용자 ID: {interaction.user.id}")
-            
-            # 모집자만 스레드 생성 가능
-            if interaction.user.id != creator_id:
-                logger.debug("스레드 생성 권한 없음 - 모집자가 아님")
-                if not interaction.response.is_done():
-                    await interaction.response.defer(ephemeral=True)
-                msg = await interaction.followup.send("모집자만 스레드를 생성할 수 있습니다.", ephemeral=True)
-                await asyncio.sleep(2)
-                await msg.delete()
-                return
+            logger.debug(f"스레드 생성 시작 - 모집자 ID: {creator_id}")
             
             # 스레드 이름 생성
             thread_name = f"{self.selected_kind} {self.selected_diff}"
@@ -643,13 +633,6 @@ class RecruitmentCard(ui.View):
                 self.recruitment_content,
                 self.db
             )
-            
-            # 모집자에게만 보이는 메시지 전송
-            if not interaction.response.is_done():
-                await interaction.response.defer(ephemeral=True)
-            msg = await interaction.followup.send(f"스레드가 생성되었습니다. 보관 기간을 설정해주세요.", ephemeral=True)
-            await asyncio.sleep(2)
-            await msg.delete()
             
             try:
                 # 스레드에 보관 기간 설정 메시지 전송
