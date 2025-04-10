@@ -290,9 +290,13 @@ class AuthCog(commands.Cog):
                 channel = member.guild.get_channel(int(channel_id))
                 
                 if channel:
-                    # 채널의 기본 메시지 자동 생성 기능 비활성화
-                    await channel.edit(slowmode_delay=1)  # 1초 슬로우모드 설정
+                    # 기존 메시지 삭제
+                    try:
+                        await channel.purge(limit=None)
+                    except Exception as e:
+                        logger.error(f"기존 메시지 삭제 중 오류 발생: {e}")
                     
+                    # 환영 메시지 전송
                     embed = discord.Embed(
                         title="서버에 오신 것을 환영합니다!",
                         description=(
@@ -308,8 +312,22 @@ class AuthCog(commands.Cog):
                         color=discord.Color.blue()
                     )
                     
-                    await channel.send(content=member.mention, embed=embed)
-                    logger.info(f"사용자 {member.id}에게 환영 메시지 전송")
+                    # 메시지 전송
+                    try:
+                        await channel.send(content=member.mention, embed=embed)
+                        logger.info(f"사용자 {member.id}에게 환영 메시지 전송")
+                    except Exception as e:
+                        logger.error(f"환영 메시지 전송 중 오류 발생: {e}")
+                        logger.error(traceback.format_exc())
+                        
+                        # 메시지 전송 실패 시 재시도
+                        try:
+                            await asyncio.sleep(1)
+                            await channel.send(content=member.mention, embed=embed)
+                            logger.info(f"사용자 {member.id}에게 환영 메시지 재전송")
+                        except Exception as e:
+                            logger.error(f"환영 메시지 재전송 중 오류 발생: {e}")
+                            logger.error(traceback.format_exc())
         except Exception as e:
             logger.error(f"환영 메시지 전송 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
@@ -322,13 +340,22 @@ class AuthCog(commands.Cog):
             guild_id = str(interaction.guild.id)
             channel_id = str(channel.id)
             
-            # 채널 설정 변경
-            await channel.edit(
+            # 서버의 시스템 채널 설정 변경
+            await interaction.guild.edit(
+                system_channel=None,  # 시스템 채널 비활성화
                 system_channel_flags=discord.SystemChannelFlags(
                     join_notifications=False,  # 입장 알림 비활성화
                     premium_subscriptions=False,  # 부스트 알림 비활성화
                     guild_reminder_notifications=False  # 서버 알림 비활성화
                 )
+            )
+            
+            # 채널 권한 설정 변경
+            await channel.set_permissions(
+                interaction.guild.default_role,
+                send_messages=False,  # 일반 사용자 메시지 전송 비활성화
+                read_messages=True,  # 메시지 읽기 허용
+                read_message_history=True  # 메시지 기록 읽기 허용
             )
             
             # DB에 저장
@@ -341,7 +368,12 @@ class AuthCog(commands.Cog):
             # 캐시 업데이트
             self.welcome_channels[guild_id] = channel_id
             
-            await interaction.response.send_message(f"환영 채널이 {channel.mention}으로 설정되었습니다.\n시스템 메시지가 비활성화되었습니다.", ephemeral=True)
+            await interaction.response.send_message(
+                f"환영 채널이 {channel.mention}으로 설정되었습니다.\n"
+                "시스템 메시지가 비활성화되었습니다.\n"
+                "일반 사용자는 메시지를 보낼 수 없습니다.",
+                ephemeral=True
+            )
             logger.info(f"서버 {guild_id}의 환영 채널 설정: {channel_id}")
         except Exception as e:
             logger.error(f"환영 채널 설정 중 오류 발생: {e}")
