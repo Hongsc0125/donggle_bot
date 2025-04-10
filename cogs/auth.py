@@ -145,6 +145,8 @@ class AuthView(discord.ui.View):
                 logger.info(f"서버 역할 생성: {self.server}")
             except discord.Forbidden:
                 logger.error(f"역할 생성 권한 없음: {self.server}")
+                await interaction.followup.send("서버 역할 생성 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
+                return
         
         # 직업 역할 찾기
         job_role = discord.utils.get(guild.roles, name=self.job)
@@ -155,6 +157,8 @@ class AuthView(discord.ui.View):
                 logger.info(f"직업 역할 생성: {self.job}")
             except discord.Forbidden:
                 logger.error(f"역할 생성 권한 없음: {self.job}")
+                await interaction.followup.send("직업 역할 생성 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
+                return
         
         # 인증 완료 역할 찾기
         auth_role = discord.utils.get(guild.roles, name="인증완료")
@@ -164,6 +168,8 @@ class AuthView(discord.ui.View):
                 logger.info("인증완료 역할 생성")
             except discord.Forbidden:
                 logger.error("역할 생성 권한 없음: 인증완료")
+                await interaction.followup.send("인증완료 역할 생성 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
+                return
         
         # 역할 부여
         try:
@@ -183,6 +189,7 @@ class AuthView(discord.ui.View):
             logger.info(f"사용자 {user.id}에게 역할 부여: {[r.name for r in roles_to_add]}")
         except discord.Forbidden:
             logger.error(f"역할 부여 권한 없음: {user.id}")
+            await interaction.followup.send("역할 부여 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
     
     async def save_user_data(self, interaction: discord.Interaction):
         """사용자 정보를 데이터베이스에 저장"""
@@ -337,6 +344,9 @@ class AuthCog(commands.Cog):
     async def set_welcome_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
         """환영 채널을 설정하는 명령어"""
         try:
+            # 즉시 응답
+            await interaction.response.defer(ephemeral=True)
+            
             guild_id = str(interaction.guild.id)
             channel_id = str(channel.id)
             
@@ -402,7 +412,7 @@ class AuthCog(commands.Cog):
             except Exception as e:
                 logger.error(f"고정 메시지 설정 중 오류 발생: {e}")
             
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"환영 채널이 {channel.mention}으로 설정되었습니다.\n"
                 "시스템 메시지가 비활성화되었습니다.\n"
                 "일반 메시지는 1시간 슬로우모드로 제한되며, 슬래시 명령어는 사용 가능합니다.",
@@ -412,7 +422,10 @@ class AuthCog(commands.Cog):
         except Exception as e:
             logger.error(f"환영 채널 설정 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
-            await interaction.response.send_message("환영 채널 설정 중 오류가 발생했습니다.", ephemeral=True)
+            try:
+                await interaction.followup.send("환영 채널 설정 중 오류가 발생했습니다.", ephemeral=True)
+            except:
+                pass
     
     @app_commands.command(name="권한", description="서버, 직업, 닉네임을 설정하여 적절한 권한을 받습니다.")
     async def auth(self, interaction: discord.Interaction):
