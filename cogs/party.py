@@ -2284,7 +2284,15 @@ class PartyCog(commands.Cog):
         """앱 명령어 상호작용 전 권한을 확인합니다."""
         # 상호작용이 서버에서 실행되었는지 확인
         if not interaction.guild_id:
-            await interaction.response.send_message("이 명령어는 서버에서만 사용할 수 있습니다.", ephemeral=True)
+            try:
+                await interaction.response.send_message("이 명령어는 서버에서만 사용할 수 있습니다.", ephemeral=True)
+            except Exception:
+                # 이미 응답이 시작된 경우
+                try:
+                    await interaction.followup.send("이 명령어는 서버에서만 사용할 수 있습니다.", ephemeral=True)
+                except Exception as e:
+                    logger.error(f"서버 외 사용 응답 오류: {e}")
+            
             logger.warning(f"서버 외부에서 명령어 사용 시도: 사용자={interaction.user.name}, 명령어={interaction.command.name if interaction.command else '알 수 없음'}")
             return False
         
@@ -2293,7 +2301,15 @@ class PartyCog(commands.Cog):
         guild_name = interaction.guild.name if interaction.guild else "알 수 없음"
         
         if not self.is_allowed_guild(guild_id):
-            await interaction.response.send_message("이 봇은 이 서버에서 사용할 수 없습니다.", ephemeral=True)
+            try:
+                await interaction.response.send_message("이 봇은 동글봇 개발팀과 연동된 서버만 사용 가능합니다.", ephemeral=True)
+            except Exception:
+                # 이미 응답이 시작된 경우
+                try:
+                    await interaction.followup.send("이 봇은 동글봇 개발팀과 연동된 서버만 사용 가능합니다.", ephemeral=True)
+                except Exception as e:
+                    logger.error(f"허용되지 않은 길드 응답 오류: {e}")
+                    
             logger.warning(f"허용되지 않은 길드에서 명령어 사용 시도: ID={guild_id}, 이름={guild_name}, 사용자={interaction.user.name}, 명령어={interaction.command.name if interaction.command else '알 수 없음'}")
             return False
         
@@ -2350,7 +2366,7 @@ class PartyCog(commands.Cog):
                 logger.info("등록된 모집 등록 채널이 없습니다.")
                 return
             
-            # 각 서버별로 등록 양식 재생성
+            # 각 서버별로 등록 양식 갱신
             for guild_id, channel_id in self.registration_channels.items():
                 try:
                     # 서버 객체 가져오기
@@ -2396,17 +2412,13 @@ class PartyCog(commands.Cog):
                         new_form = await self.create_registration_form(channel)
                         if new_form:
                             logger.info(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에 새 양식 생성 성공 (메시지 ID: {new_form.id})")
-                            await interaction.followup.send(f"모집 등록 양식이 갱신되었습니다. {deleted_count}개의 이전 양식이 삭제되었습니다.", ephemeral=True)
                         else:
                             logger.error(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에 새 양식 생성 실패 (반환값 없음)")
-                            await interaction.followup.send("모집 등록 양식 갱신이 완료되었으나, 새 양식 생성에 문제가 있을 수 있습니다.", ephemeral=True)
                     except Exception as form_error:
                         logger.error(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에 새 양식 생성 중 오류: {form_error}")
                         logger.error(traceback.format_exc())
-                        await interaction.followup.send("모집 등록 양식 갱신 중 오류가 발생했습니다. 관리자에게 문의하세요.", ephemeral=True)
-                        return
                     
-                    logger.info(f"서버 {guild_id}의 모집 등록 양식 수동 갱신 완료")
+                    logger.info(f"서버 {guild_id}의 모집 등록 양식 자동 갱신 완료")
                     
                 except Exception as e:
                     logger.error(f"모집 양식 갱신 - 서버 {guild_id}의 양식 갱신 중 오류: {e}")
