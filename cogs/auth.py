@@ -136,43 +136,53 @@ class AuthView(discord.ui.View):
         guild = interaction.guild
         user = interaction.user
         
-        # 서버 역할 찾기
-        server_role = discord.utils.get(guild.roles, name=self.server)
-        if not server_role:
-            # 역할이 없으면 생성
-            try:
-                server_role = await guild.create_role(name=self.server, reason="자동 역할 생성")
-                logger.info(f"서버 역할 생성: {self.server}")
-            except discord.Forbidden:
-                logger.error(f"역할 생성 권한 없음: {self.server}")
-                await interaction.followup.send("서버 역할 생성 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
-                return
-        
-        # 직업 역할 찾기
-        job_role = discord.utils.get(guild.roles, name=self.job)
-        if not job_role:
-            # 역할이 없으면 생성
-            try:
-                job_role = await guild.create_role(name=self.job, reason="자동 역할 생성")
-                logger.info(f"직업 역할 생성: {self.job}")
-            except discord.Forbidden:
-                logger.error(f"역할 생성 권한 없음: {self.job}")
-                await interaction.followup.send("직업 역할 생성 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
-                return
-        
-        # 인증 완료 역할 찾기
-        auth_role = discord.utils.get(guild.roles, name="인증완료")
-        if not auth_role:
-            try:
-                auth_role = await guild.create_role(name="인증완료", reason="자동 역할 생성")
-                logger.info("인증완료 역할 생성")
-            except discord.Forbidden:
-                logger.error("역할 생성 권한 없음: 인증완료")
-                await interaction.followup.send("인증완료 역할 생성 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
-                return
-        
-        # 역할 부여
         try:
+            # 사용자가 이미 가진 역할 로그
+            logger.info(f"사용자 {user.id}의 현재 역할: {[r.name for r in user.roles]}")
+            # 서버 역할 목록 로그
+            logger.info(f"서버 {guild.id}의 역할 목록: {[r.name for r in guild.roles]}")
+            # 봇의 역할 및 권한 로그
+            bot_member = guild.get_member(self.cog.bot.user.id)
+            logger.info(f"봇 {bot_member.id}의 역할: {[r.name for r in bot_member.roles]}")
+            logger.info(f"봇의 관리자 권한: {bot_member.guild_permissions.administrator}")
+            logger.info(f"봇의 역할 관리 권한: {bot_member.guild_permissions.manage_roles}")
+            
+            # 서버 역할 찾기
+            server_role = discord.utils.get(guild.roles, name=self.server)
+            if not server_role:
+                # 역할이 없으면 생성
+                try:
+                    server_role = await guild.create_role(name=self.server, reason="자동 역할 생성")
+                    logger.info(f"서버 역할 생성: {self.server}")
+                except discord.Forbidden:
+                    logger.error(f"역할 생성 권한 없음: {self.server}")
+                    await interaction.followup.send("서버 역할 생성 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
+                    # 계속 진행 (return 제거)
+            
+            # 직업 역할 찾기
+            job_role = discord.utils.get(guild.roles, name=self.job)
+            if not job_role:
+                # 역할이 없으면 생성
+                try:
+                    job_role = await guild.create_role(name=self.job, reason="자동 역할 생성")
+                    logger.info(f"직업 역할 생성: {self.job}")
+                except discord.Forbidden:
+                    logger.error(f"역할 생성 권한 없음: {self.job}")
+                    await interaction.followup.send("직업 역할 생성 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
+                    # 계속 진행 (return 제거)
+            
+            # 인증 완료 역할 찾기
+            auth_role = discord.utils.get(guild.roles, name="인증완료")
+            if not auth_role:
+                try:
+                    auth_role = await guild.create_role(name="인증완료", reason="자동 역할 생성")
+                    logger.info("인증완료 역할 생성")
+                except discord.Forbidden:
+                    logger.error("역할 생성 권한 없음: 인증완료")
+                    await interaction.followup.send("인증완료 역할 생성 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
+                    # 계속 진행 (return 제거)
+            
+            # 역할 부여 (각각 별도로 시도)
             roles_to_add = []
             if server_role:
                 roles_to_add.append(server_role)
@@ -181,15 +191,25 @@ class AuthView(discord.ui.View):
             if auth_role:
                 roles_to_add.append(auth_role)
             
-            # 역할 할당
+            # 개별적으로 역할 할당
             for role in roles_to_add:
                 if role not in user.roles:
-                    await user.add_roles(role, reason="자동 권한 설정")
+                    try:
+                        await user.add_roles(role, reason="자동 권한 설정")
+                        logger.info(f"사용자 {user.id}에게 역할 부여: {role.name}")
+                    except discord.Forbidden:
+                        logger.error(f"특정 역할 부여 권한 없음: {role.name}")
+                        await interaction.followup.send(f"{role.name} 역할 부여 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
             
-            logger.info(f"사용자 {user.id}에게 역할 부여: {[r.name for r in roles_to_add]}")
+            # 성공적으로 부여된 역할 확인
+            logger.info(f"부여 시도 후 사용자 {user.id}의 역할: {[r.name for r in user.roles]}")
         except discord.Forbidden:
             logger.error(f"역할 부여 권한 없음: {user.id}")
             await interaction.followup.send("역할 부여 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
+        except Exception as e:
+            logger.error(f"역할 부여 중 예상치 못한 오류 발생: {e}")
+            logger.error(traceback.format_exc())
+            await interaction.followup.send("역할 부여 중 오류가 발생했습니다. 관리자에게 문의해주세요.", ephemeral=True)
     
     async def save_user_data(self, interaction: discord.Interaction):
         """사용자 정보를 데이터베이스에 저장"""
@@ -360,13 +380,33 @@ class AuthCog(commands.Cog):
                 )
             )
             
-            # 채널 권한 설정 변경
+            # 기본 역할 권한 설정 (인증되지 않은 사용자)
             await channel.set_permissions(
                 interaction.guild.default_role,
                 send_messages=True,  # 메시지 전송 허용 (슬래시 명령어 사용을 위해)
                 read_messages=True,  # 메시지 읽기 허용
                 read_message_history=True  # 메시지 기록 읽기 허용
             )
+            
+            # 인증 완료 역할 찾기
+            auth_role = discord.utils.get(interaction.guild.roles, name="인증완료")
+            
+            # 인증 완료 역할이 없으면 생성
+            if not auth_role:
+                try:
+                    auth_role = await interaction.guild.create_role(name="인증완료", reason="환영 채널 설정을 위한 자동 역할 생성")
+                    logger.info(f"인증완료 역할 생성: {auth_role.id}")
+                except Exception as e:
+                    logger.error(f"인증완료 역할 생성 중 오류 발생: {e}")
+            
+            # 인증 완료 역할에 대한 권한 설정 (채널을 볼 수 없게)
+            if auth_role:
+                await channel.set_permissions(
+                    auth_role,
+                    read_messages=False,  # 채널 자체를 볼 수 없게 설정
+                    send_messages=False
+                )
+                logger.info(f"인증완료 역할에 대한 환영 채널 권한 설정: 채널 숨김")
             
             # 슬로우모드 설정 (1시간)
             await channel.edit(slowmode_delay=3600)  # 3600초 = 1시간
@@ -399,7 +439,7 @@ class AuthCog(commands.Cog):
                     "1. `/권한` 명령어를 사용하여 권한 설정 메뉴를 열어주세요\n"
                     "2. 각 항목별로 필요한 정보를 입력해주세요\n"
                     "3. 모든 권한이 설정되면 서버의 모든 기능을 이용할 수 있습니다\n\n"
-                    "※ 이 채널에서는 일반 메시지를 보낼 수 없으며, 슬래시 명령어만 사용 가능합니다."
+                    "※ 권한 설정이 완료되면 이 채널은 더 이상 보이지 않습니다."
                 ),
                 color=discord.Color.blue()
             )
@@ -415,7 +455,7 @@ class AuthCog(commands.Cog):
             await interaction.followup.send(
                 f"환영 채널이 {channel.mention}으로 설정되었습니다.\n"
                 "시스템 메시지가 비활성화되었습니다.\n"
-                "일반 메시지는 1시간 슬로우모드로 제한되며, 슬래시 명령어는 사용 가능합니다.",
+                "인증 완료된 사용자에게는 채널이 보이지 않으며, 일반 메시지는 1시간 슬로우모드로 제한됩니다.",
                 ephemeral=True
             )
             logger.info(f"서버 {guild_id}의 환영 채널 설정: {channel_id}")
