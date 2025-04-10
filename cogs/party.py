@@ -1536,6 +1536,7 @@ class PartyCog(commands.Cog):
             
             # 완료되거나 취소된 모집의 메시지 삭제
             deleted_count = 0
+            updated_count = 0
             async for message in channel.history(limit=100):
                 try:
                     # 메시지가 임베드를 가지고 있는지 확인
@@ -1568,6 +1569,68 @@ class PartyCog(commands.Cog):
                             deleted_count += 1
                         elif status == "active":
                             logger.debug(f"서버 {guild_id}의 모집 ID {recruitment_id}는 아직 활성 상태입니다.")
+                            
+                            # 활성 모집의 경우 상호작용을 갱신
+                            try:
+                                # 모집 데이터 가져오기
+                                recruitment = await self.db.recruitments.find_one({"_id": ObjectId(recruitment_id)})
+                                if recruitment:
+                                    # 해당 모집 데이터로 뷰 생성
+                                    from views.recruitment_card import RecruitmentCard
+                                    view = RecruitmentCard(self.dungeons, self.db)
+                                    view.recruitment_id = recruitment_id
+                                    view.selected_type = recruitment.get("dungeon_type")
+                                    view.selected_kind = recruitment.get("dungeon_kind") 
+                                    view.selected_diff = recruitment.get("dungeon_difficulty")
+                                    view.recruitment_content = recruitment.get("content")
+                                    view.max_participants = recruitment.get("max_participants")
+                                    view.status = recruitment.get("status", "active")
+                                    view.participants = [str(p) for p in recruitment.get("participants", [])]
+                                    
+                                    # 임베드 생성
+                                    embed = view.get_embed()
+                                    
+                                    # 버튼 설정
+                                    view.clear_items()
+                                    
+                                    # 참가하기 버튼 추가
+                                    join_button = discord.ui.Button(label="참가하기", style=discord.ButtonStyle.success, custom_id="btn_join", row=0)
+                                    join_button.callback = view.btn_join_callback
+                                    view.add_item(join_button)
+                                    
+                                    # 신청 취소 버튼 추가
+                                    cancel_button = discord.ui.Button(label="신청 취소", style=discord.ButtonStyle.danger, custom_id="btn_cancel", row=0)
+                                    cancel_button.callback = view.btn_cancel_callback
+                                    view.add_item(cancel_button)
+                                    
+                                    # 첫 번째 참가자에게만 모집 취소 버튼 표시
+                                    if view.participants and len(view.participants) > 0:
+                                        first_participant_id = None
+                                        try:
+                                            first_participant_id = int(view.participants[0]) if isinstance(view.participants[0], str) else view.participants[0]
+                                        except (ValueError, TypeError):
+                                            logger.warning(f"첫 번째 참가자 ID를 정수로 변환할 수 없음: {view.participants[0]}")
+                                        
+                                        if first_participant_id:
+                                            from views.recruitment_card import CreatorOnlyButton
+                                            delete_button = CreatorOnlyButton(
+                                                label="모집 취소",
+                                                style=discord.ButtonStyle.danger,
+                                                custom_id="btn_delete",
+                                                callback=view.btn_delete_callback,
+                                                creator_id=first_participant_id,
+                                                row=1
+                                            )
+                                            view.add_item(delete_button)
+                                    
+                                    # 메시지 업데이트
+                                    await message.edit(embed=embed, view=view)
+                                    view.message = message
+                                    updated_count += 1
+                                    logger.debug(f"서버 {guild_id}의 모집 ID {recruitment_id}의 메시지를 갱신했습니다.")
+                            except Exception as e:
+                                logger.error(f"활성 모집 메시지 갱신 중 오류 발생: {e}")
+                                logger.error(traceback.format_exc())
                         elif recruitment_id not in recruitment_status_map:
                             # 데이터베이스에 없는 모집의 메시지는 삭제
                             logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}가 데이터베이스에 존재하지 않아 메시지를 삭제합니다.")
@@ -1581,7 +1644,7 @@ class PartyCog(commands.Cog):
                     logger.error(traceback.format_exc())
                     continue
             
-            logger.debug(f"서버 {guild_id}의 채널 정리 완료: {deleted_count}개의 메시지가 삭제되었습니다.")
+            logger.debug(f"서버 {guild_id}의 채널 정리 완료: {deleted_count}개의 메시지가 삭제되었고, {updated_count}개의 메시지가 갱신되었습니다.")
         
         except Exception as e:
             logger.error(f"강제 채널 정리 중 오류 발생: {e}")
