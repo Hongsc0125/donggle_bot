@@ -999,6 +999,12 @@ class PartyCog(commands.Cog):
             )
             
             embed.add_field(
+                name="/쓰레드채널설정",
+                value="파티 모집 완료 시 비밀 쓰레드가 생성될 채널을 설정합니다. (관리자 전용)",
+                inline=False
+            )
+            
+            embed.add_field(
                 name="/채널페어설정",
                 value="등록 채널과 공고 채널을 페어링하여, 특정 등록 채널에서 등록된 모집이 특정 공고 채널에만 표시되도록 설정합니다. (관리자 전용)",
                 inline=False
@@ -2258,6 +2264,37 @@ class PartyCog(commands.Cog):
         
         # 허용된 길드인지 확인
         return self.is_allowed_guild(ctx.guild.id)
+
+    @app_commands.command(name="쓰레드채널설정", description="파티 모집 완료 시 비밀 쓰레드가 생성될 채널을 설정합니다.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def set_thread_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        """비밀 쓰레드가 생성될 채널을 설정하는 명령어"""
+        try:
+            guild_id = str(interaction.guild.id)
+            channel_id = str(channel.id)
+            
+            # DB에 저장
+            await self.db["settings"].update_one(
+                {"guild_id": guild_id},
+                {"$set": {"thread_channel_id": channel_id}},
+                upsert=True
+            )
+            
+            await interaction.response.send_message(f"비밀 쓰레드 생성 채널이 {channel.mention}으로 설정되었습니다.", ephemeral=True)
+            logger.info(f"서버 {guild_id}의 쓰레드 채널 설정: {channel_id}")
+        except Exception as e:
+            logger.error(f"쓰레드 채널 설정 중 오류 발생: {e}")
+            logger.error(traceback.format_exc())
+            await interaction.response.send_message("쓰레드 채널 설정 중 오류가 발생했습니다.", ephemeral=True)
+
+    @set_thread_channel.error
+    async def thread_channel_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        """쓰레드 채널 설정 중 오류 처리"""
+        if isinstance(error, app_commands.errors.MissingPermissions):
+            await interaction.response.send_message("이 명령어는 관리자만 사용할 수 있습니다.", ephemeral=True)
+        else:
+            logger.error(f"쓰레드 채널 설정 중 오류: {error}")
+            await interaction.response.send_message("명령어 실행 중 오류가 발생했습니다.", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(PartyCog(bot))

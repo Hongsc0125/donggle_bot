@@ -77,7 +77,7 @@ class NicknameButton(discord.ui.Button):
 
 class AuthView(discord.ui.View):
     def __init__(self, cog):
-        super().__init__(timeout=600)  # 10분 타임아웃
+        super().__init__(timeout=None)  # 10분 타임아웃
         self.cog = cog
         self.server = None
         self.job = None
@@ -290,9 +290,21 @@ class AuthCog(commands.Cog):
                 channel = member.guild.get_channel(int(channel_id))
                 
                 if channel:
+                    # 채널의 기본 메시지 자동 생성 기능 비활성화
+                    await channel.edit(slowmode_delay=1)  # 1초 슬로우모드 설정
+                    
                     embed = discord.Embed(
                         title="서버에 오신 것을 환영합니다!",
-                        description=f"{member.mention}님, `/권한` 명령어를 사용하여 서버, 직업, 닉네임을 설정해주세요.",
+                        description=(
+                            f"{member.mention}님, 서버 이용을 위해 다음 권한을 설정해주세요:\n\n"
+                            "1. **서버 권한** - 서버 내 활동을 위한 기본 권한\n"
+                            "2. **직업 권한** - 파티 모집 시 필요한 직업 정보\n"
+                            "3. **닉네임 권한** - 서버 내 표시될 닉네임\n\n"
+                            "권한 설정 방법:\n"
+                            "1. `/권한` 명령어를 사용하여 권한 설정 메뉴를 열어주세요\n"
+                            "2. 각 항목별로 필요한 정보를 입력해주세요\n"
+                            "3. 모든 권한이 설정되면 서버의 모든 기능을 이용할 수 있습니다"
+                        ),
                         color=discord.Color.blue()
                     )
                     
@@ -395,7 +407,7 @@ class AuthCog(commands.Cog):
 
 class ReauthConfirmView(discord.ui.View):
     def __init__(self, cog):
-        super().__init__(timeout=60)  # 1분 타임아웃
+        super().__init__(timeout=None)  # 1분 타임아웃
         self.cog = cog
     
     @discord.ui.button(label="네", style=discord.ButtonStyle.primary)

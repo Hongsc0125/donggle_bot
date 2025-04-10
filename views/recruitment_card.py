@@ -569,25 +569,61 @@ class RecruitmentCard(ui.View):
                 await msg.delete()
 
     async def create_private_thread(self, interaction: discord.Interaction):
-        """모집 완료 시 스레드를 생성합니다."""
+        """모집 완료 시 비밀 스레드를 지정된 채널에 생성합니다."""
         try:
             # 모집자 ID 가져오기 (첫 번째 참가자가 모집자)
             creator_id = int(self.participants[0]) if self.participants else None
             
             logger.debug(f"스레드 생성 시작 - 모집자 ID: {creator_id}")
             
+            # 모집자만 스레드 생성 가능하도록 체크
+            if interaction.user.id != creator_id:
+                if not interaction.response.is_done():
+                    await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("모집자만 스레드를 생성할 수 있습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+                return
+            
             # 스레드 이름 생성
             thread_name = f"{self.selected_kind} {self.selected_diff}"
             logger.debug(f"스레드 이름 생성: {thread_name}")
             
+            # 스레드를 생성할 채널 찾기 (설정에서 불러오기)
+            guild = interaction.guild
+            guild_id = str(guild.id)
+            
+            # DB에서 스레드 채널 ID 가져오기 (settings 컬렉션에 thread_channel_id로 저장되어 있다고 가정)
+            settings = await self.db["settings"].find_one({"guild_id": guild_id})
+            thread_channel_id = settings.get("thread_channel_id") if settings else None
+            
+            thread_channel = None
+            if thread_channel_id:
+                thread_channel = guild.get_channel(int(thread_channel_id))
+            
+            # 지정된 채널이 없으면 현재 채널 사용
+            if not thread_channel:
+                thread_channel = interaction.channel
+                logger.warning(f"지정된 스레드 채널이 없어 현재 채널을 사용합니다: {thread_channel.id}")
+            
             try:
-                # 스레드 생성
-                thread = await interaction.channel.create_thread(
+                # 비밀 스레드 생성
+                thread = await thread_channel.create_thread(
                     name=thread_name,
-                    type=discord.ChannelType.public_thread,
-                    auto_archive_duration=60  # 기본값 1시간
+                    type=discord.ChannelType.private_thread,  # 비밀 스레드로 변경
+                    auto_archive_duration=1440  # 기본값 1일로 변경
                 )
-                logger.debug(f"스레드 생성 성공 - 스레드 ID: {thread.id}")
+                logger.debug(f"비밀 스레드 생성 성공 - 스레드 ID: {thread.id}")
+                
+                # 참가자들 자동 추가
+                for participant_id in self.participants:
+                    try:
+                        member = guild.get_member(int(participant_id))
+                        if member:
+                            await thread.add_user(member)
+                    except Exception as e:
+                        logger.error(f"참가자 추가 실패 (ID: {participant_id}): {e}")
+                
             except discord.Forbidden:
                 logger.error("스레드 생성 실패 - 권한 부족")
                 if not interaction.response.is_done():
@@ -613,6 +649,7 @@ class RecruitmentCard(ui.View):
                     {
                         "$set": {
                             "thread_id": str(thread.id),
+                            "thread_channel_id": str(thread_channel.id),
                             "thread_status": "pending",
                             "updated_at": now
                         }
@@ -637,10 +674,24 @@ class RecruitmentCard(ui.View):
             try:
                 # 스레드에 보관 기간 설정 메시지 전송
                 await thread.send(f"<@{creator_id}> 스레드 보관 기간을 설정해주세요.", view=archive_view)
+                
+                # 모집에 참여한 사람들 멘션
+                if len(self.participants) > 1:
+                    mentions = " ".join([f"<@{p_id}>" for p_id in self.participants])
+                    await thread.send(f"**모집이 완료되었습니다!**\n{mentions}\n이 쓰레드에서 대화를 이어가세요.")
+                
                 logger.debug("스레드 초기 메시지 전송 성공")
+                
+                # 모집자에게만 비밀 메시지로 알림 (ephemeral)
+                if not interaction.response.is_done():
+                    await interaction.response.defer(ephemeral=True)
+                await interaction.followup.send(f"비밀 스레드가 생성되었습니다: {thread.jump_url}", ephemeral=True)
             except Exception as e:
                 logger.error(f"스레드 초기 메시지 전송 실패: {e}")
                 # 메시지 전송 실패해도 스레드 생성은 완료된 것으로 간주
+                if not interaction.response.is_done():
+                    await interaction.response.defer(ephemeral=True)
+                await interaction.followup.send("스레드가 생성되었지만 메시지 전송에 실패했습니다.", ephemeral=True)
             
         except Exception as e:
             logger.error(f"스레드 생성 중 오류 발생: {e}")
