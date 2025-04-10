@@ -48,12 +48,25 @@ class DonggleBot(commands.Bot):
         
     async def setup_hook(self):
         # 확장 기능 로드
-        await self.load_extension("cogs.party")
+        extensions = [
+            "cogs.party",
+            "cogs.auth"  # 새로운 권한 관리 코그 추가
+        ]
+        
+        # 모든 확장 기능 로드
+        for extension in extensions:
+            try:
+                await self.load_extension(extension)
+                logger.info(f"확장 기능 로드 완료: {extension}")
+            except Exception as e:
+                logger.error(f"확장 기능 로드 실패: {extension} - {e}")
+                logger.error(traceback.format_exc())
         
         # 봇이 준비되면 자동으로 명령어 동기화
         try:
-            await self.tree.sync()
-            logger.info("명령어 트리가 동기화되었습니다.")
+            # 모든 코그가 로드된 후 명령어 동기화
+            synced_commands = await self.tree.sync()
+            logger.info(f"명령어 트리가 동기화되었습니다. {len(synced_commands)}개 명령어 등록됨.")
         except Exception as e:
             logger.error(f"명령어 트리 동기화 중 오류 발생: {e}")
             logger.warning("슬래시 명령어를 사용하려면 애플리케이션 ID가 필요합니다.")
@@ -136,8 +149,7 @@ class DonggleBot(commands.Bot):
                     "파티 모집 중",
                     "던전 탐험 중",
                     "레이드 준비 중",
-                    "모험자 모집 중",
-                    "/모집초기화 명령어 사용 가능"
+                    "모험자 모집 중"
                 ]
                 
                 activity_type = random.choice([
