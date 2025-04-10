@@ -1219,17 +1219,26 @@ class PartyCog(commands.Cog):
             cancel_button.callback = announcement_view.btn_cancel_callback
             announcement_view.add_item(cancel_button)
             
-            # 모집 생성자에게만 모집 취소 버튼 표시 (row 1)
-            if announcement_view.creator_id:
+            # 모집 취소 버튼 추가 (첫 번째 참가자에게만 보이도록 - row 1)
+            # 참가자 목록이 있고 첫 번째 참가자 ID가 있을 경우에만 추가
+            first_participant_id = None
+            if hasattr(announcement_view, 'participants') and announcement_view.participants:
+                try:
+                    first_participant_id = int(announcement_view.participants[0])
+                except (ValueError, TypeError):
+                    logger.warning(f"첫 번째 참가자 ID를 정수로 변환할 수 없음: {announcement_view.participants[0]}")
+            
+            if first_participant_id:
                 delete_button = CreatorOnlyButton(
                     label="모집 취소", 
                     style=discord.ButtonStyle.danger, 
                     custom_id="btn_delete", 
                     callback=announcement_view.btn_delete_callback,
-                    creator_id=announcement_view.creator_id,
+                    creator_id=first_participant_id,
                     row=1
                 )
                 announcement_view.add_item(delete_button)
+                logger.debug(f"모집 취소 버튼이 첫 번째 참가자 ID {first_participant_id}에게 표시됩니다.")
             
             # 공고 전송
             try:

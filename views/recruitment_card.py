@@ -351,16 +351,25 @@ class RecruitmentCard(ui.View):
                 cancel_button.callback = self.btn_cancel_callback
                 self.add_item(cancel_button)
                 
-                # 모집 취소 버튼 (모집자에게만 보이는 버튼으로 변경)
-                delete_button = CreatorOnlyButton(
-                    label="모집 취소",
-                    style=discord.ButtonStyle.danger,
-                    custom_id="btn_delete",
-                    callback=self.btn_delete_callback,
-                    creator_id=self.creator_id,
-                    row=4
-                )
-                self.add_item(delete_button)
+                # 모집 취소 버튼 (첫 번째 참가자에게만 보이는 버튼으로 변경)
+                if self.participants and len(self.participants) > 0:
+                    first_participant_id = None
+                    try:
+                        first_participant_id = int(self.participants[0]) if isinstance(self.participants[0], str) else self.participants[0]
+                    except (ValueError, TypeError):
+                        logger.warning(f"첫 번째 참가자 ID를 정수로 변환할 수 없음: {self.participants[0]}")
+                    
+                    if first_participant_id:
+                        delete_button = CreatorOnlyButton(
+                            label="모집 취소",
+                            style=discord.ButtonStyle.danger,
+                            custom_id="btn_delete",
+                            callback=self.btn_delete_callback,
+                            creator_id=first_participant_id,
+                            row=4
+                        )
+                        self.add_item(delete_button)
+                        logger.debug(f"모집 취소 버튼이 첫 번째 참가자 ID {first_participant_id}에게 표시됩니다.")
             
             # 임베드 업데이트
             embed = self.get_embed()
@@ -519,9 +528,28 @@ class RecruitmentCard(ui.View):
     async def btn_delete_callback(self, interaction: discord.Interaction):
         """모집 취소 버튼 콜백"""
         try:
-            # 참고: 버튼 클래스(CreatorOnlyButton)에서 이미 모집자 검증을 했으므로 여기서는 생략 가능
-            # 하지만 다른 경로로도 콜백이 호출될 수 있으므로 여기서도 검증 유지
-            if interaction.user.id != self.creator_id:
+            # 참가자 목록 확인
+            if not self.participants or len(self.participants) == 0:
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("참가자 정보가 없습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+                return
+            
+            # 첫 번째 참가자(모집자) 확인
+            first_participant_id = None
+            try:
+                first_participant_id = int(self.participants[0]) if isinstance(self.participants[0], str) else self.participants[0]
+            except (ValueError, TypeError):
+                logger.warning(f"첫 번째 참가자 ID를 정수로 변환할 수 없음: {self.participants[0]}")
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("참가자 정보 처리 중 오류가 발생했습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+                return
+            
+            # 첫 번째 참가자만 취소 가능
+            if interaction.user.id != first_participant_id:
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("모집 생성자만 취소할 수 있습니다.", ephemeral=True)
                 await asyncio.sleep(2)
@@ -882,13 +910,19 @@ class RecruitmentCard(ui.View):
                 await msg.delete()
                 return
             
-            # 모집 생성자는 참가 취소 불가능
-            if user_id == self.creator_id:
-                await interaction.response.defer(ephemeral=True)
-                msg = await interaction.followup.send("모집 생성자는 참가를 취소할 수 없습니다.", ephemeral=True)
-                await asyncio.sleep(2)
-                await msg.delete()
-                return
+            # 모집 생성자(첫 번째 참가자)는 참가 취소 불가능
+            if self.participants and len(self.participants) > 0:
+                first_participant_id = None
+                try:
+                    first_participant_id = int(self.participants[0]) if isinstance(self.participants[0], str) else self.participants[0]
+                    if user_id == first_participant_id:
+                        await interaction.response.defer(ephemeral=True)
+                        msg = await interaction.followup.send("모집 생성자는 참가를 취소할 수 없습니다.", ephemeral=True)
+                        await asyncio.sleep(2)
+                        await msg.delete()
+                        return
+                except (ValueError, TypeError):
+                    logger.warning(f"첫 번째 참가자 ID를 정수로 변환할 수 없음: {self.participants[0]}")
             
             # 참가자 제거
             self.participants.remove(user_id)
