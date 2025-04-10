@@ -2441,6 +2441,5 @@ async def setup(bot):
     if not bot_cog:
         logger.error("PartyCog를 찾을 수 없습니다.")
     else:
-        # 활성화 유지 작업 시작
-        bot_cog.keep_alive.start()
-        logger.info("PartyCog와 활성화 유지 작업이 시작되었습니다.")
+        # 태스크는 이미 생성자에서 시작되었으므로 여기서는 시작하지 않음
+        logger.info("PartyCog가 로드되었습니다.")
