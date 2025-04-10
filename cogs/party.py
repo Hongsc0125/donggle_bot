@@ -113,13 +113,14 @@ class PartyCog(commands.Cog):
         self.db = get_database()
         self.announcement_channels = {}  # 서버별 공고 채널 ID 저장 딕셔너리
         self.registration_channels = {}  # 서버별 등록 채널 ID 저장 딕셔너리
-        self.channel_pairs = {}  # 서버별 채널 페어 관계 저장 딕셔너리 (등록 채널 ID -> 공고 채널 ID)
         self.registration_locked = False  # 모집 등록 잠금 상태 (5초간)
         self.dungeons = []  # 던전 목록 추가
         self._load_settings_sync()
         self.cleanup_channel.start()  # 채널 정리 작업 시작
         self.recruiting_dict = {}  # 모집 정보를 저장할 딕셔너리
         self.initialization_retries = {}  # 채널 초기화 재시도 카운터
+        # 허용된 길드 ID 목록
+        self.allowed_guild_ids = ["1359541321185886400", "1359677298604900462"]
 
     def _load_settings_sync(self):
         """초기 설정을 동기적으로 로드합니다."""
@@ -706,6 +707,12 @@ class PartyCog(commands.Cog):
             return
             
         guild_id = str(message.guild.id)
+        guild_name = message.guild.name
+        
+        # 허용되지 않은 길드는 무시
+        if not self.is_allowed_guild(guild_id):
+            logger.debug(f"허용되지 않은 길드에서 메시지 수신: ID={guild_id}, 이름={guild_name}, 채널={message.channel.name}, 사용자={message.author.name}")
+            return
             
         # 공고 채널인지 확인
         if guild_id in self.announcement_channels and str(message.channel.id) == self.announcement_channels[guild_id]:
@@ -1114,6 +1121,14 @@ class PartyCog(commands.Cog):
 
     async def force_cleanup_channel(self, guild_id, channel_id):
         """특정 채널의 완료된 모집 메시지를 강제로 삭제합니다."""
+        # 허용된 길드인지 확인
+        guild = self.bot.get_guild(int(guild_id))
+        guild_name = guild.name if guild else "알 수 없음"
+        
+        if not self.is_allowed_guild(guild_id):
+            logger.debug(f"허용되지 않은 길드의 채널 정리 요청 무시: ID={guild_id}, 이름={guild_name}")
+            return
+            
         try:
             # 서버 객체 가져오기
             guild = self.bot.get_guild(int(guild_id))
@@ -1672,6 +1687,577 @@ class PartyCog(commands.Cog):
             logger.error(f"채널 페어 설정 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
             await interaction.followup.send("채널 페어 설정 중 오류가 발생했습니다.", ephemeral=True)
+
+    # 길드 ID 유효성 검사 메서드 추가
+    def is_allowed_guild(self, guild_id):
+        """허용된 길드인지 확인합니다."""
+        guild_id_str = str(guild_id)
+        is_allowed = guild_id_str in self.allowed_guild_ids
+        
+        # 길드 이름 가져오기 시도
+        guild_name = "알 수 없음"
+        guild = self.bot.get_guild(int(guild_id_str))
+        if guild:
+            guild_name = guild.name
+        
+        if is_allowed:
+            logger.info(f"허용된 길드 접근: ID={guild_id_str}, 이름={guild_name}")
+        else:
+            logger.warning(f"허용되지 않은 길드 접근 시도: ID={guild_id_str}, 이름={guild_name}")
+            
+            # 비허용 길드 정보를 DB에 저장
+            try:
+                # 비동기 작업을 봇 루프에 추가
+                self.bot.loop.create_task(self._store_banned_guild(guild_id_str, guild_name))
+            except Exception as e:
+                logger.error(f"비허용 길드 정보 저장 중 오류 발생: {e}")
+        
+        return is_allowed
+        
+    async def _store_banned_guild(self, guild_id, guild_name):
+        """허용되지 않은 길드 정보를 banned 컬렉션에 저장합니다."""
+        try:
+            # 이미 존재하는지 확인하고 없으면 새로 추가, 있으면 접근 시간 업데이트
+            await self.db["banned"].update_one(
+                {"guild_id": guild_id},
+                {"$set": {
+                    "guild_id": guild_id,
+                    "guild_name": guild_name,
+                    "last_access": datetime.now().isoformat()
+                }},
+                upsert=True
+            )
+            logger.info(f"비허용 길드 정보가 banned 컬렉션에 저장됨: ID={guild_id}, 이름={guild_name}")
+        except Exception as e:
+            logger.error(f"banned 컬렉션에 저장 중 오류 발생: {e}")
+            logger.error(traceback.format_exc())
+
+    async def force_cleanup_channel(self, guild_id, channel_id):
+        """특정 채널의 완료된 모집 메시지를 강제로 삭제합니다."""
+        # 허용된 길드인지 확인
+        guild = self.bot.get_guild(int(guild_id))
+        guild_name = guild.name if guild else "알 수 없음"
+        
+        if not self.is_allowed_guild(guild_id):
+            logger.debug(f"허용되지 않은 길드의 채널 정리 요청 무시: ID={guild_id}, 이름={guild_name}")
+            return
+            
+        try:
+            # 서버 객체 가져오기
+            guild = self.bot.get_guild(int(guild_id))
+            if not guild:
+                logger.warning(f"서버를 찾을 수 없음: {guild_id}")
+                return
+            
+            # 채널 객체 가져오기
+            channel = guild.get_channel(int(channel_id))
+            if not channel:
+                logger.warning(f"서버 {guild_id}의 공고 채널을 찾을 수 없음: {channel_id}")
+                return
+            
+            # 서버별 모집 정보 조회
+            recruitments = await self.db.recruitments.find({"guild_id": guild_id}).to_list(None)
+            
+            # 모집 ID와 상태 매핑 생성
+            recruitment_status_map = {}
+            recruitment_message_map = {}
+            message_recruitment_map = {}
+            
+            # 모집 정보 정리
+            for recruitment in recruitments:
+                recruitment_id = str(recruitment.get('_id'))
+                status = recruitment.get('status', 'unknown')
+                recruitment_status_map[recruitment_id] = status
+                
+                # 공고 메시지 ID가 있으면 매핑에 추가
+                if "announcement_message_id" in recruitment:
+                    message_id = recruitment["announcement_message_id"]
+                    recruitment_message_map[recruitment_id] = message_id
+                    message_recruitment_map[message_id] = recruitment_id
+            
+            logger.debug(f"서버 {guild_id}에서 {len(recruitments)}개의 모집을 찾았습니다.")
+            
+            # 활성 모집 ID 목록 생성
+            active_recruitment_ids = set()
+            completed_recruitment_ids = set()
+            cancelled_recruitment_ids = set()
+            
+            for recruitment_id, status in recruitment_status_map.items():
+                if status == 'active':
+                    active_recruitment_ids.add(recruitment_id)
+                elif status == 'complete':
+                    completed_recruitment_ids.add(recruitment_id)
+                elif status == 'cancelled':
+                    cancelled_recruitment_ids.add(recruitment_id)
+            
+            logger.debug(f"서버 {guild_id} - 활성 모집: {len(active_recruitment_ids)}개, 완료된 모집: {len(completed_recruitment_ids)}개, 취소된 모집: {len(cancelled_recruitment_ids)}개")
+            
+            # 채널에 있는 메시지 ID를 모집 ID와 매핑
+            channel_message_recruitment_map = {}
+            
+            # 채널의 메시지 확인
+            async for message in channel.history(limit=100):  # 최근 100개 메시지만 확인
+                try:
+                    # 메시지가 임베드를 가지고 있는지 확인
+                    if not message.embeds:
+                        continue
+        
+                    # 임베드에서 모집 ID 찾기
+                    recruitment_id = None
+                    
+                    # 임베드의 푸터에서 모집 ID 찾기
+                    if message.embeds[0].footer and message.embeds[0].footer.text:
+                        footer_text = message.embeds[0].footer.text
+                        if footer_text.startswith("모집 ID:"):
+                            recruitment_id = footer_text.replace("모집 ID:", "").strip()
+                            if " | " in recruitment_id:
+                                recruitment_id = recruitment_id.split(" | ")[0].strip()
+                    
+                    # 임베드의 필드에서 모집 ID 찾기 (이전 방식 호환)
+                    if not recruitment_id:
+                        for field in message.embeds[0].fields:
+                            if field.name == "모집 ID":
+                                recruitment_id = field.value
+                                break
+        
+                    if recruitment_id:
+                        channel_message_recruitment_map[str(message.id)] = recruitment_id
+                        
+                        # 활성 모집에 대한 메시지 매핑 업데이트
+                        if recruitment_id in active_recruitment_ids:
+                            # DB에 메시지 ID 업데이트 (기존 정보가 없을 경우)
+                            if recruitment_id not in recruitment_message_map or recruitment_message_map[recruitment_id] != str(message.id):
+                                await self.db["recruitments"].update_one(
+                                    {"_id": ObjectId(recruitment_id)},
+                                    {"$set": {
+                                        "announcement_message_id": str(message.id),
+                                        "announcement_channel_id": str(channel.id),
+                                        "guild_id": guild_id,
+                                        "updated_at": datetime.now().isoformat()
+                                    }}
+                                )
+                                logger.info(f"서버 {guild_id}에서 발견된 활성 모집 {recruitment_id}의 메시지 ID를 업데이트했습니다: {message.id}")
+        
+                except Exception as e:
+                    logger.error(f"메시지 처리 중 오류 발생: {e}")
+                    logger.error(traceback.format_exc())
+                    continue
+            
+            # 활성 모집 중 메시지가 없는 경우 새로 게시
+            active_recruitments_to_post = []
+            for recruitment_id in active_recruitment_ids:
+                # 채널 내 메시지에서 해당 모집 ID를 찾지 못한 경우
+                if not any(r_id == recruitment_id for r_id in channel_message_recruitment_map.values()):
+                    # 해당 모집 데이터 찾기
+                    recruitment = next((r for r in recruitments if str(r.get('_id')) == recruitment_id), None)
+                    if recruitment:
+                        active_recruitments_to_post.append(recruitment)
+            
+            # 누락된 활성 모집 공고 게시
+            for recruitment in active_recruitments_to_post:
+                try:
+                    recruitment_id = str(recruitment.get('_id'))
+                    logger.info(f"서버 {guild_id}의 누락된 모집 공고 재게시: {recruitment_id}")
+                    
+                    # 모집 데이터로 뷰 생성
+                    view = RecruitmentCard(self.dungeons, self.db)
+                    view.recruitment_id = recruitment_id
+                    view.selected_type = recruitment.get("type", "")
+                    view.selected_kind = recruitment.get("dungeon", "")
+                    view.selected_diff = recruitment.get("difficulty", "")
+                    view.recruitment_content = recruitment.get("description", "")
+                    view.max_participants = recruitment.get("max_participants", 4)
+                    view.status = recruitment.get("status", "active")
+                    
+                    # 참가자 목록 변환
+                    try:
+                        participants = recruitment.get("participants", [])
+                        view.participants = [int(p) for p in participants]
+                    except ValueError:
+                        logger.warning(f"참가자 ID 변환 중 오류: {participants}")
+                        view.participants = []
+                    
+                    try:
+                        view.creator_id = int(recruitment.get("creator_id", 0))
+                    except ValueError:
+                        logger.warning(f"생성자 ID 변환 중 오류: {recruitment.get('creator_id')}")
+                        view.creator_id = 0
+                    
+                    # 공고 게시
+                    await self.post_recruitment_announcement(guild_id, recruitment, view)
+                    
+                except Exception as e:
+                    logger.error(f"모집 공고 재게시 중 오류 발생: {e}")
+                    logger.error(traceback.format_exc())
+            
+            # 중복된 활성 모집 공고 찾기
+            duplicate_messages = {}
+            
+            # 활성 모집 ID별로 채널 내 메시지 집계
+            for message_id, recruitment_id in channel_message_recruitment_map.items():
+                if recruitment_id in active_recruitment_ids:
+                    if recruitment_id not in duplicate_messages:
+                        duplicate_messages[recruitment_id] = []
+                    duplicate_messages[recruitment_id].append(message_id)
+            
+            # 모집 ID별로 2개 이상의 메시지가 있으면 가장 최근 것을 제외하고 삭제
+            for recruitment_id, message_ids in duplicate_messages.items():
+                if len(message_ids) > 1:
+                    logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}에 대한 중복 메시지 발견: {len(message_ids)}개")
+                    # 메시지 ID를 정수로 변환하여 정렬 (최신 메시지가 큰 ID 값을 가짐)
+                    sorted_message_ids = sorted([int(mid) for mid in message_ids], reverse=True)
+                    # 가장 최신 메시지를 제외한 나머지 삭제
+                    for message_id in sorted_message_ids[1:]:
+                        try:
+                            message = await channel.fetch_message(message_id)
+                            await message.delete()
+                            logger.info(f"서버 {guild_id}의 중복 메시지 삭제: {message_id}")
+                        except Exception as e:
+                            logger.error(f"중복 메시지 삭제 중 오류: {e}")
+            
+            # 완료되거나 취소된 모집의 메시지 삭제
+            deleted_count = 0
+            async for message in channel.history(limit=100):
+                try:
+                    # 메시지가 임베드를 가지고 있는지 확인
+                    if not message.embeds:
+                        continue
+        
+                    # 임베드에서 모집 ID 찾기
+                    recruitment_id = None
+                    if message.embeds[0].footer and message.embeds[0].footer.text:
+                        footer_text = message.embeds[0].footer.text
+                        if footer_text.startswith("모집 ID:"):
+                            recruitment_id = footer_text.replace("모집 ID:", "").strip()
+                            if " | " in recruitment_id:
+                                recruitment_id = recruitment_id.split(" | ")[0].strip()
+                    
+                    # 임베드의 필드에서 모집 ID 찾기 (이전 방식 호환)
+                    if not recruitment_id:
+                        for field in message.embeds[0].fields:
+                            if field.name == "모집 ID":
+                                recruitment_id = field.value
+                                break
+        
+                    if recruitment_id:
+                        status = recruitment_status_map.get(recruitment_id, "unknown")
+                        
+                        # 완료되거나 취소된 모집의 메시지만 삭제
+                        if status in ["complete", "cancelled"]:
+                            logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}의 상태가 {status}이므로 메시지를 삭제합니다.")
+                            await message.delete()
+                            deleted_count += 1
+                        elif status == "active":
+                            logger.debug(f"서버 {guild_id}의 모집 ID {recruitment_id}는 아직 활성 상태입니다.")
+                        elif recruitment_id not in recruitment_status_map:
+                            # 데이터베이스에 없는 모집의 메시지는 삭제
+                            logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}가 데이터베이스에 존재하지 않아 메시지를 삭제합니다.")
+                            await message.delete()
+                            deleted_count += 1
+                        else:
+                            logger.debug(f"서버 {guild_id}의 모집 ID {recruitment_id}의 상태가 {status}로 처리되지 않았습니다.")
+        
+                except Exception as e:
+                    logger.error(f"메시지 처리 중 오류 발생: {e}")
+                    logger.error(traceback.format_exc())
+                    continue
+            
+            logger.debug(f"서버 {guild_id}의 채널 정리 완료: {deleted_count}개의 메시지가 삭제되었습니다.")
+        
+        except Exception as e:
+            logger.error(f"강제 채널 정리 중 오류 발생: {e}")
+            logger.error(traceback.format_exc())
+
+    @app_commands.command(name="모집초기화", description="모집 등록 채널을 초기화합니다.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def reset_registration_channel(self, interaction: discord.Interaction):
+        """모집 등록 채널 초기화 명령어 - 관리자 전용"""
+        try:
+            # 서버의 길드 ID 가져오기
+            guild_id = str(interaction.guild_id)
+            
+            # 채널 ID 가져오기
+            settings = await self.db["settings"].find_one({"guild_id": guild_id})
+            if not settings or "registration_channel_id" not in settings:
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("모집 등록 채널이 설정되지 않았습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+                return
+            
+            # 채널 가져오기
+            channel = interaction.guild.get_channel(int(settings["registration_channel_id"]))
+            if not channel:
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("모집 등록 채널을 찾을 수 없습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+                return
+
+            # 채널 초기화
+            await channel.purge(limit=None)
+            await self.create_registration_form(channel)
+            
+            # 응답 메시지
+            await interaction.response.defer(ephemeral=True)
+            msg = await interaction.followup.send("모집 등록 채널이 초기화되었습니다.", ephemeral=True)
+            await asyncio.sleep(2)
+            await msg.delete()
+            
+        except discord.app_commands.errors.MissingPermissions:
+            await interaction.response.send_message("이 명령어는 관리자만 사용할 수 있습니다.", ephemeral=True)
+        except Exception as e:
+            logger.error(f"모집 등록 채널 초기화 중 오류 발생: {e}")
+            logger.error(traceback.format_exc())
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+                msg = await interaction.followup.send("모집 등록 채널 초기화 중 오류가 발생했습니다.", ephemeral=True)
+                await asyncio.sleep(2)
+                await msg.delete()
+
+    @app_commands.command(name="채널페어설정", description="등록 채널과 공고 채널을 페어링합니다.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def set_channel_pair(self, interaction: discord.Interaction, 등록채널: discord.TextChannel, 공고채널: discord.TextChannel):
+        """채널 페어 설정 명령어 - 관리자 전용"""
+        try:
+            await interaction.response.defer(ephemeral=True)
+            
+            # 서버의 길드 ID 가져오기
+            guild_id = str(interaction.guild_id)
+            
+            # 서버별 채널 페어 관계 가져오기
+            settings = await self.db["settings"].find_one({"guild_id": guild_id})
+            channel_pairs = settings.get("channel_pairs", {}) if settings else {}
+            
+            # 채널 페어 관계 업데이트
+            channel_pairs[str(등록채널.id)] = str(공고채널.id)
+            
+            # DB에 저장
+            await self.db["settings"].update_one(
+                {"guild_id": guild_id},
+                {"$set": {
+                    "channel_pairs": channel_pairs,
+                    "updated_at": datetime.now().isoformat()
+                }},
+                upsert=True
+            )
+            
+            # 메모리에도 저장
+            if guild_id not in self.channel_pairs:
+                self.channel_pairs[guild_id] = {}
+            self.channel_pairs[guild_id][str(등록채널.id)] = str(공고채널.id)
+            
+            # 응답 메시지
+            await interaction.followup.send(
+                f"등록 채널 {등록채널.mention}에서 등록된 모집 공고가 {공고채널.mention} 채널에 게시되도록 설정되었습니다.",
+                ephemeral=True
+            )
+            
+        except discord.app_commands.errors.MissingPermissions:
+            await interaction.followup.send("이 명령어는 관리자만 사용할 수 있습니다.", ephemeral=True)
+        except Exception as e:
+            logger.error(f"채널 페어 설정 중 오류 발생: {e}")
+            logger.error(traceback.format_exc())
+            await interaction.followup.send("채널 페어 설정 중 오류가 발생했습니다.", ephemeral=True)
+
+    @app_commands.command(name="채널페어삭제", description="등록 채널과 공고 채널의 페어링을 삭제합니다.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def delete_channel_pair(self, interaction: discord.Interaction, 등록채널: discord.TextChannel):
+        """채널 페어 삭제 명령어 - 관리자 전용"""
+        try:
+            await interaction.response.defer(ephemeral=True)
+            
+            # 서버의 길드 ID 가져오기
+            guild_id = str(interaction.guild_id)
+            
+            # 서버별 채널 페어 관계 가져오기
+            settings = await self.db["settings"].find_one({"guild_id": guild_id})
+            channel_pairs = settings.get("channel_pairs", {}) if settings else {}
+            
+            # 해당 등록 채널의 페어 관계가 있는지 확인
+            if str(등록채널.id) not in channel_pairs:
+                await interaction.followup.send(f"등록 채널 {등록채널.mention}에 대한 페어 설정이 없습니다.", ephemeral=True)
+                return
+            
+            # 채널 페어 관계에서 해당 등록 채널 삭제
+            del channel_pairs[str(등록채널.id)]
+            
+            # DB에 저장
+            await self.db["settings"].update_one(
+                {"guild_id": guild_id},
+                {"$set": {
+                    "channel_pairs": channel_pairs,
+                    "updated_at": datetime.now().isoformat()
+                }},
+                upsert=True
+            )
+            
+            # 메모리에도 저장
+            if guild_id in self.channel_pairs and str(등록채널.id) in self.channel_pairs[guild_id]:
+                del self.channel_pairs[guild_id][str(등록채널.id)]
+            
+            # 응답 메시지
+            await interaction.followup.send(f"등록 채널 {등록채널.mention}의 페어 설정이 삭제되었습니다.", ephemeral=True)
+            
+        except discord.app_commands.errors.MissingPermissions:
+            await interaction.followup.send("이 명령어는 관리자만 사용할 수 있습니다.", ephemeral=True)
+        except Exception as e:
+            logger.error(f"채널 페어 삭제 중 오류 발생: {e}")
+            logger.error(traceback.format_exc())
+            await interaction.followup.send("채널 페어 삭제 중 오류가 발생했습니다.", ephemeral=True)
+
+    @app_commands.command(name="채널페어목록", description="설정된 채널 페어 목록을 확인합니다.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def list_channel_pairs(self, interaction: discord.Interaction):
+        """채널 페어 목록 명령어 - 관리자 전용"""
+        try:
+            await interaction.response.defer(ephemeral=True)
+            
+            # 서버의 길드 ID 가져오기
+            guild_id = str(interaction.guild_id)
+            
+            # 서버별 채널 페어 관계 가져오기
+            if guild_id not in self.channel_pairs or not self.channel_pairs[guild_id]:
+                await interaction.followup.send("설정된 채널 페어가 없습니다.", ephemeral=True)
+                return
+            
+            # 임베드 생성
+            embed = discord.Embed(
+                title="채널 페어 설정 목록",
+                description="등록 채널과 공고 채널의 페어링 목록입니다.",
+                color=discord.Color.blue()
+            )
+            
+            # 채널 페어 목록 추가
+            for reg_channel_id, ann_channel_id in self.channel_pairs[guild_id].items():
+                reg_channel = interaction.guild.get_channel(int(reg_channel_id))
+                ann_channel = interaction.guild.get_channel(int(ann_channel_id))
+                
+                reg_channel_mention = reg_channel.mention if reg_channel else f"알 수 없는 채널 (ID: {reg_channel_id})"
+                ann_channel_mention = ann_channel.mention if ann_channel else f"알 수 없는 채널 (ID: {ann_channel_id})"
+                
+                embed.add_field(
+                    name=f"등록 채널",
+                    value=f"{reg_channel_mention} ➡️ {ann_channel_mention}",
+                    inline=False
+                )
+            
+            # 응답 메시지
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            
+        except discord.app_commands.errors.MissingPermissions:
+            await interaction.followup.send("이 명령어는 관리자만 사용할 수 있습니다.", ephemeral=True)
+        except Exception as e:
+            logger.error(f"채널 페어 목록 표시 중 오류 발생: {e}")
+            logger.error(traceback.format_exc())
+            await interaction.followup.send("채널 페어 목록 표시 중 오류가 발생했습니다.", ephemeral=True)
+
+    # 명령어 오류 처리
+    async def command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        """명령어 오류 처리"""
+        if isinstance(error, app_commands.errors.MissingPermissions):
+            await interaction.response.send_message("이 명령어는 관리자만 사용할 수 있습니다.", ephemeral=True)
+        else:
+            logger.error(f"명령어 실행 중 오류 발생: {error}")
+            logger.error(traceback.format_exc())
+            if not interaction.response.is_done():
+                await interaction.response.send_message("명령어 실행 중 오류가 발생했습니다.", ephemeral=True)
+    
+    # 각 명령어에 에러 핸들러 추가
+    @app_commands.command(name="채널페어설정", description="등록 채널과 공고 채널을 페어링합니다.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def set_channel_pair(self, interaction: discord.Interaction, 등록채널: discord.TextChannel, 공고채널: discord.TextChannel):
+        """채널 페어 설정 명령어 - 관리자 전용"""
+        try:
+            await interaction.response.defer(ephemeral=True)
+            
+            # 서버의 길드 ID 가져오기
+            guild_id = str(interaction.guild_id)
+            
+            # 서버별 채널 페어 관계 가져오기
+            settings = await self.db["settings"].find_one({"guild_id": guild_id})
+            channel_pairs = settings.get("channel_pairs", {}) if settings else {}
+            
+            # 채널 페어 관계 업데이트
+            channel_pairs[str(등록채널.id)] = str(공고채널.id)
+            
+            # DB에 저장
+            await self.db["settings"].update_one(
+                {"guild_id": guild_id},
+                {"$set": {
+                    "channel_pairs": channel_pairs,
+                    "updated_at": datetime.now().isoformat()
+                }},
+                upsert=True
+            )
+            
+            # 메모리에도 저장
+            if guild_id not in self.channel_pairs:
+                self.channel_pairs[guild_id] = {}
+            self.channel_pairs[guild_id][str(등록채널.id)] = str(공고채널.id)
+            
+            # 응답 메시지
+            await interaction.followup.send(
+                f"등록 채널 {등록채널.mention}에서 등록된 모집 공고가 {공고채널.mention} 채널에 게시되도록 설정되었습니다.",
+                ephemeral=True
+            )
+            
+        except discord.app_commands.errors.MissingPermissions:
+            await interaction.followup.send("이 명령어는 관리자만 사용할 수 있습니다.", ephemeral=True)
+        except Exception as e:
+            logger.error(f"채널 페어 설정 중 오류 발생: {e}")
+            logger.error(traceback.format_exc())
+            await interaction.followup.send("채널 페어 설정 중 오류가 발생했습니다.", ephemeral=True)
+
+    # 길드 ID 유효성 검사 메서드 추가
+    def is_allowed_guild(self, guild_id):
+        """허용된 길드인지 확인합니다."""
+        guild_id_str = str(guild_id)
+        is_allowed = guild_id_str in self.allowed_guild_ids
+        
+        # 길드 이름 가져오기 시도
+        guild_name = "알 수 없음"
+        guild = self.bot.get_guild(int(guild_id_str))
+        if guild:
+            guild_name = guild.name
+        
+        if is_allowed:
+            logger.info(f"허용된 길드 접근: ID={guild_id_str}, 이름={guild_name}")
+        else:
+            logger.warning(f"허용되지 않은 길드 접근 시도: ID={guild_id_str}, 이름={guild_name}")
+        
+        return is_allowed
+
+    # 각 명령어에 대한 길드 ID 검사 추가
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """앱 명령어 상호작용 전 권한을 확인합니다."""
+        # 상호작용이 서버에서 실행되었는지 확인
+        if not interaction.guild_id:
+            await interaction.response.send_message("이 명령어는 서버에서만 사용할 수 있습니다.", ephemeral=True)
+            logger.warning(f"서버 외부에서 명령어 사용 시도: 사용자={interaction.user.name}, 명령어={interaction.command.name if interaction.command else '알 수 없음'}")
+            return False
+        
+        # 허용된 길드인지 확인
+        guild_id = str(interaction.guild_id)
+        guild_name = interaction.guild.name if interaction.guild else "알 수 없음"
+        
+        if not self.is_allowed_guild(guild_id):
+            await interaction.response.send_message("이 봇은 이 서버에서 사용할 수 없습니다.", ephemeral=True)
+            logger.warning(f"허용되지 않은 길드에서 명령어 사용 시도: ID={guild_id}, 이름={guild_name}, 사용자={interaction.user.name}, 명령어={interaction.command.name if interaction.command else '알 수 없음'}")
+            return False
+        
+        logger.info(f"명령어 사용: 길드={guild_name}({guild_id}), 사용자={interaction.user.name}, 명령어={interaction.command.name if interaction.command else '알 수 없음'}")
+        return True
+
+    # 명령어 실행 전 권한 확인 메서드 추가
+    async def cog_check(self, ctx):
+        """Cog 명령어 실행 전 권한을 확인합니다."""
+        # 서버에서 실행된 명령어인지 확인
+        if not ctx.guild:
+            return False
+        
+        # 허용된 길드인지 확인
+        return self.is_allowed_guild(ctx.guild.id)
 
 async def setup(bot):
     await bot.add_cog(PartyCog(bot))
