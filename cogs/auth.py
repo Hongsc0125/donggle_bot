@@ -8,6 +8,7 @@ import traceback
 import asyncio
 from core.config import settings
 import re
+from discord.ext import tasks
 
 # 로깅 설정
 logger = logging.getLogger('donggle_bot.auth')
@@ -246,6 +247,8 @@ class AuthCog(commands.Cog):
         self.db = get_database()
         self.welcome_channels = {}  # 서버별 환영 채널 저장
         self._load_settings()
+        # 환영 채널 정리 작업 시작
+        self.cleanup_welcome_channels.start()
     
     def _load_settings(self):
         """초기 설정을 로드합니다."""
@@ -532,6 +535,91 @@ class AuthCog(commands.Cog):
             logger.error(f"닉네임 확인 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
             await interaction.response.send_message("명령어 실행 중 오류가 발생했습니다.", ephemeral=True)
+
+    @tasks.loop(hours=12)  # 12시간마다 실행
+    async def cleanup_welcome_channels(self):
+        """환영 채널의 메시지를 주기적으로 정리합니다."""
+        logger.info("환영 채널 정리 작업 시작")
+        
+        for guild_id, channel_id in self.welcome_channels.items():
+            try:
+                # 서버 객체 가져오기
+                guild = self.bot.get_guild(int(guild_id))
+                if not guild:
+                    logger.warning(f"서버를 찾을 수 없음: {guild_id}")
+                    continue
+                
+                # 채널 객체 가져오기
+                channel = guild.get_channel(int(channel_id))
+                if not channel:
+                    logger.warning(f"서버 {guild_id}의 환영 채널을 찾을 수 없음: {channel_id}")
+                    continue
+                
+                logger.info(f"서버 {guild_id}({guild.name})의 환영 채널 {channel_id}({channel.name}) 정리 시작")
+                
+                # 고정된 메시지 찾기
+                pinned_messages = await channel.pins()
+                pinned_message_ids = [msg.id for msg in pinned_messages]
+                
+                # 모든 메시지 삭제 (고정된 메시지 제외)
+                try:
+                    def is_not_pinned(message):
+                        return message.id not in pinned_message_ids
+                    
+                    deleted = await channel.purge(limit=100, check=is_not_pinned)
+                    logger.info(f"서버 {guild_id}의 환영 채널에서 {len(deleted)}개 메시지 삭제 완료")
+                except discord.errors.Forbidden:
+                    logger.error(f"서버 {guild_id}의 환영 채널에서 메시지 삭제 권한이 없습니다.")
+                except Exception as e:
+                    logger.error(f"서버 {guild_id}의 환영 채널 메시지 삭제 중 오류 발생: {e}")
+                    logger.error(traceback.format_exc())
+                
+                # 고정 메시지가 없으면 새로 생성
+                if not pinned_messages:
+                    try:
+                        # 고정 환영 메시지 전송
+                        embed = discord.Embed(
+                            title="서버 이용 안내",
+                            description=(
+                                "서버 이용을 위해 다음 권한을 설정해주세요:\n\n"
+                                "1. **서버 권한** - 서버 내 활동을 위한 기본 권한\n"
+                                "2. **직업 권한** - 파티 모집 시 필요한 직업 정보\n"
+                                "3. **닉네임 권한** - 서버 내 표시될 닉네임\n\n"
+                                "권한 설정 방법:\n"
+                                "1. `/권한` 명령어를 사용하여 권한 설정 메뉴를 열어주세요\n"
+                                "2. 각 항목별로 필요한 정보를 입력해주세요\n"
+                                "3. 모든 권한이 설정되면 서버의 모든 기능을 이용할 수 있습니다\n\n"
+                                "※ 권한 설정이 완료되면 이 채널은 더 이상 보이지 않습니다."
+                            ),
+                            color=discord.Color.blue()
+                        )
+                        
+                        message = await channel.send(embed=embed)
+                        await message.pin()
+                        logger.info(f"서버 {guild_id}의 환영 채널에 새 고정 메시지 생성")
+                    except Exception as e:
+                        logger.error(f"서버 {guild_id}의 환영 채널에 고정 메시지 생성 중 오류 발생: {e}")
+                        logger.error(traceback.format_exc())
+                
+                # 작업 완료 후 잠시 대기 (API 속도 제한 방지)
+                await asyncio.sleep(2)
+                
+            except Exception as e:
+                logger.error(f"서버 {guild_id}의 환영 채널 정리 작업 중 오류 발생: {e}")
+                logger.error(traceback.format_exc())
+        
+        logger.info("환영 채널 정리 작업 완료")
+
+    @cleanup_welcome_channels.before_loop
+    async def before_cleanup(self):
+        """정리 작업 시작 전 봇이 준비될 때까지 대기합니다."""
+        await self.bot.wait_until_ready()
+        logger.info("환영 채널 정리 작업 준비 완료")
+
+    def cog_unload(self):
+        """Cog가 언로드될 때 작업을 중지합니다."""
+        self.cleanup_welcome_channels.cancel()
+        logger.info("환영 채널 정리 작업 중지됨")
 
 class ReauthConfirmView(discord.ui.View):
     def __init__(self, cog):
