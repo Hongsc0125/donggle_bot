@@ -816,6 +816,7 @@ class PartyCog(commands.Cog):
         """모집 정보를 바탕으로 공고를 새로 생성합니다."""
         try:
             logger.info(f"모집 ID {recruitment_data.get('_id')}에 대한 공고 생성 시작")
+            logger.info(f"모집 데이터:::::: {recruitment_data}")
             
             # 모집 데이터로 뷰 생성
             view = RecruitmentCard(self.dungeons, self.db)
@@ -1340,7 +1341,7 @@ class PartyCog(commands.Cog):
         self.refresh_registration_forms.cancel()  # 새로 추가된 양식 갱신 작업 취소
         logger.info("Party cog unloaded")
 
-    @tasks.loop(minutes=10)  # 10분마다 실행
+    @tasks.loop(minutes=1)  # 10분마다 실행
     async def initialize_and_cleanup(self):
         """봇의 상태를 체크하고 채널을 초기화 및 정리하는 메서드"""
         try:
