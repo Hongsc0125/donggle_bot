@@ -439,11 +439,11 @@ class RecruitmentCard(ui.View):
         try:
             # 모집 정보 생성
             recruitment_data = {
-                "dungeon_type": self.selected_type,
-                "dungeon_kind": self.selected_kind,
-                "dungeon_difficulty": self.selected_diff,
+                "type": self.selected_type,
+                "dungeon": self.selected_kind,
+                "difficulty": self.selected_diff,
                 "max_participants": self.max_participants,
-                "content": self.recruitment_content,
+                "description": self.recruitment_content,
                 "creator_id": str(interaction.user.id),
                 "creator_name": interaction.user.display_name,
                 "participants": [str(interaction.user.id)],
