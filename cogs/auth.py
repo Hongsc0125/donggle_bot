@@ -536,7 +536,7 @@ class AuthCog(commands.Cog):
             logger.error(traceback.format_exc())
             await interaction.response.send_message("명령어 실행 중 오류가 발생했습니다.", ephemeral=True)
 
-    @tasks.loop(hours=12)  # 12시간마다 실행
+    @tasks.loop(minutes=10)
     async def cleanup_welcome_channels(self):
         """환영 채널의 메시지를 주기적으로 정리합니다."""
         logger.info("환영 채널 정리 작업 시작")

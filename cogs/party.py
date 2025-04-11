@@ -654,163 +654,177 @@ class PartyCog(commands.Cog):
             logger.error(traceback.format_exc())
 
     async def process_active_recruitments(self, guild, guild_id, active_recruitments, channel):
-        """활성 모집 정보와 채널 메시지를 비교하여 필요한 작업을 수행합니다."""
+        logger.info(f"[DEBUG] process_active_recruitments 시작 - 서버: {guild_id}, 채널: {channel.id}")
         try:
-            logger.info(f"서버 {guild_id}의 채널 {channel.id}에서 활성 모집 처리 시작")
-            
-            # 채널에 있는 메시지 조회
-            channel_messages = []
+            updated_count = 0
+            created_count = 0
+            deleted_count = 0
+            duplicate_deleted_count = 0
+
+            # 먼저 채널의 모든 메시지를 불러와서 모집 ID별로 정리
+            logger.info(f"[DEBUG] 채널 {channel.id}의 메시지를 불러와 모집 ID 매핑을 생성합니다")
+            recruitment_messages = {}  # 모집 ID -> 메시지 목록
             try:
-                logger.info(f"채널 {channel.id}의 메시지 히스토리 불러오기")
+                # 최대 100개의 메시지만 조회
                 async for message in channel.history(limit=100):
-                    channel_messages.append(message)
-                logger.info(f"채널 {channel.id}에서 {len(channel_messages)}개 메시지 불러옴")
-            except discord.errors.Forbidden:
-                logger.error(f"채널 {channel.id}에서 메시지 조회 권한 없음")
-                return
-            except Exception as e:
-                logger.error(f"채널 {channel.id} 메시지 히스토리 조회 중 오류: {e}")
-                logger.error(traceback.format_exc())
-                return
-            
-            # 모집 ID를 키로 하는 메시지 매핑 생성
-            recruitment_message_map = {}
-            message_recruitment_map = {}
-            
-            # 채널 메시지에서 모집 ID 추출
-            for message in channel_messages:
-                # 임베드가 없는 메시지 건너뛰기
-                if not message.embeds:
-                    continue
-                
-                # 임베드에서 모집 ID 찾기
-                recruitment_id = None
-                if message.embeds[0].footer and message.embeds[0].footer.text:
+                    # 메시지가 임베드를 가지고 있는지 확인
+                    if not message.embeds or not message.embeds[0].footer:
+                        continue
+                    
+                    # 임베드에서 모집 ID 찾기
                     footer_text = message.embeds[0].footer.text
-                    if footer_text.startswith("모집 ID:"):
+                    if footer_text and footer_text.startswith("모집 ID:"):
                         recruitment_id = footer_text.replace("모집 ID:", "").strip()
                         if " | " in recruitment_id:
                             recruitment_id = recruitment_id.split(" | ")[0].strip()
-                
-                # 임베드의 필드에서 모집 ID 찾기 (이전 방식 호환)
-                if not recruitment_id:
-                    for field in message.embeds[0].fields:
-                        if field.name == "모집 ID":
-                            recruitment_id = field.value
-                            break
-                
-                if recruitment_id:
-                    # DB에 있는 최신 정보 확인
-                    if recruitment_id not in recruitment_message_map:
-                        recruitment_message_map[recruitment_id] = []
-                    
-                    recruitment_message_map[recruitment_id].append(message)
-                    message_recruitment_map[message.id] = recruitment_id
+                        
+                        if recruitment_id:
+                            if recruitment_id not in recruitment_messages:
+                                recruitment_messages[recruitment_id] = []
+                            recruitment_messages[recruitment_id].append(message)
+                            logger.info(f"[DEBUG] 채널 {channel.id}에서 모집 ID {recruitment_id}의 메시지 {message.id} 발견")
+            except Exception as e:
+                logger.error(f"[DEBUG] 채널 메시지 조회 중 오류: {e}")
+                logger.error(traceback.format_exc())
             
-            logger.info(f"채널 {channel.id}에서 {len(recruitment_message_map)}개의 모집 공고 메시지 발견")
-            
-            # 활성 모집 ID와 메시지 매핑
-            active_recruitment_ids = set()
-            active_recruitment_map = {}
-            
-            # 활성 모집 정보 정리
-            for recruitment in active_recruitments:
-                recruitment_id = str(recruitment.get("_id"))
-                active_recruitment_ids.add(recruitment_id)
-                active_recruitment_map[recruitment_id] = recruitment
-            
-            # 0. 중복 메시지 처리: 각 모집 ID에 대해 최신 메시지만 남기고 삭제
-            for recruitment_id, messages in recruitment_message_map.items():
+            # 각 모집 ID별로 중복 메시지 처리
+            for recruitment_id, messages in recruitment_messages.items():
                 if len(messages) > 1:
-                    logger.info(f"모집 {recruitment_id}에 대한 중복 메시지 {len(messages)}개 발견")
-                    # 메시지 ID 기준으로 정렬하여 가장 최신 메시지(ID가 가장 큰)만 유지
-                    messages.sort(key=lambda m: m.id, reverse=True)
-                    # 가장 최근 메시지를 제외한 나머지 삭제
-                    for message in messages[1:]:
-                        try:
-                            await message.delete()
-                            logger.info(f"중복 메시지 {message.id} 삭제 완료")
-                        except Exception as e:
-                            logger.error(f"중복 메시지 삭제 중 오류: {e}")
-                    
-                    # 단일 메시지로 업데이트
-                    recruitment_message_map[recruitment_id] = [messages[0]]
-            
-            # 1. 채널에 있는 모집 중 이미 완료되거나 취소된 것 삭제
-            for recruitment_id, messages in list(recruitment_message_map.items()):
-                if recruitment_id not in active_recruitment_ids:
+                    logger.info(f"[DEBUG] 모집 ID {recruitment_id}의 중복 메시지 {len(messages)}개 발견")
+                    # 모든 중복 메시지 삭제 (새로 생성할 예정이므로)
                     for message in messages:
                         try:
                             await message.delete()
-                            logger.info(f"채널 {channel.id}에서 비활성 모집 {recruitment_id}의 메시지 삭제")
+                            duplicate_deleted_count += 1
+                            logger.info(f"[DEBUG] 중복 모집 ID {recruitment_id}의 메시지 {message.id} 삭제")
                         except Exception as e:
-                            logger.error(f"메시지 삭제 중 오류: {e}")
-            
-            # 2. 활성 모집 중 채널에 없는 것 생성하거나 데이터가 변경된 경우 업데이트
-            for recruitment_id, recruitment in active_recruitment_map.items():
-                # 등록 채널 ID 확인 (이 모집이 어느 등록 채널에서 왔는지)
+                            logger.error(f"[DEBUG] 중복 메시지 삭제 중 오류: {e}")
+                    # 해당 ID의 모든 메시지를 삭제했으므로 목록 비우기
+                    recruitment_messages[recruitment_id] = []
+
+            # 이제 각 활성 모집 처리
+            for recruitment in active_recruitments:
+                recruitment_id = str(recruitment.get('_id'))
+                logger.info(f"[DEBUG] 모집 처리 시작 - ID: {recruitment_id}")
+                logger.info(f"[DEBUG] 모집 데이터: {recruitment}")
+                
+                # 모집 데이터 검증
+                required_fields = ['type', 'dungeon', 'difficulty', 'max_participants', 'description']
+                missing_fields = [field for field in required_fields if not recruitment.get(field)]
+                if missing_fields:
+                    logger.warning(f"[DEBUG] 모집 {recruitment_id}에 누락된 필드: {missing_fields}")
+                    continue
+                
+                # 각 모집이 해당 채널에 속하는지 확인
                 registration_channel_id = str(recruitment.get("registration_channel_id", "0"))
+                announcement_channel_id = str(recruitment.get("announcement_channel_id", "0"))
+                announcement_message_id = str(recruitment.get("announcement_message_id", "0"))
                 
-                # 모집이 이 채널에 표시되어야 하는지 확인
-                should_display = False
+                # 이 채널이 해당 모집의 공고 채널인지, 또는 페어링된 채널인지 확인
+                channel_id_str = str(channel.id)
+                is_paired_channel = False
                 
-                # 기본 공고 채널인 경우 (페어링 없는 등록 채널에서 온 모집)
-                if str(channel.id) == self.announcement_channels.get(guild_id, "0"):
-                    # 페어링 관계 확인
-                    if (guild_id not in self.channel_pairs or 
-                        registration_channel_id not in self.channel_pairs[guild_id]):
-                        should_display = True
-                        logger.info(f"모집 {recruitment_id}는 페어링 없는 등록 채널에서 왔으므로 기본 공고 채널에 표시")
+                # 이 모집의 등록 채널이 현재 채널과 페어링되어 있는지 확인
+                pairs = self.channel_pairs.get(guild_id, {})
+                if registration_channel_id in pairs and pairs[registration_channel_id] == channel_id_str:
+                    logger.info(f"모집 {recruitment_id}는 이 채널({channel_id_str})과 페어링된 등록 채널({registration_channel_id})에서 왔으므로 표시")
+                    is_paired_channel = True
                 
-                # 페어링된 공고 채널인 경우
-                elif guild_id in self.channel_pairs:
-                    # 이 채널과 페어링된 등록 채널 확인
-                    for reg_channel_id, ann_channel_id in self.channel_pairs[guild_id].items():
-                        if str(channel.id) == ann_channel_id and registration_channel_id == reg_channel_id:
-                            should_display = True
-                            logger.info(f"모집 {recruitment_id}는 이 채널({channel.id})과 페어링된 등록 채널({registration_channel_id})에서 왔으므로 표시")
-                            break
+                # 공고 채널이 현재 채널인 경우
+                if announcement_channel_id == channel_id_str:
+                    logger.info(f"모집 {recruitment_id}는 이 채널({channel_id_str})을 공고 채널로 지정했으므로 표시")
+                    is_paired_channel = True
                 
-                # 이 채널에 표시해야 하는 모집인 경우
-                if should_display:
-                    # 해당 모집에 대한 메시지가 이미 있는지 확인
-                    existing_messages = recruitment_message_map.get(recruitment_id, [])
-                    
-                    # 메시지가 없으면 새로 생성
-                    if not existing_messages:
-                        try:
-                            logger.info(f"채널 {channel.id}에 모집 {recruitment_id} 공고 게시 시도")
-                            
-                            # 공고 게시
-                            await self.create_recruitment_announcement(guild_id, recruitment)
-                            
-                        except Exception as e:
-                            logger.error(f"모집 공고 게시 중 오류 발생: {e}")
-                            logger.error(traceback.format_exc())
-                    else:
-                        # 메시지가 있으면 DB의 최신 정보와 비교하여 업데이트 필요한지 확인
-                        existing_message = existing_messages[0]
-                        needs_update = await self.check_announcement_needs_update(existing_message, recruitment)
+                # 해당 모집이 이 채널에 표시되어야 하는 경우만 처리
+                if not is_paired_channel:
+                    logger.info(f"모집 {recruitment_id}는 이 채널({channel_id_str})과 관련이 없어 건너뜁니다")
+                    continue
+                
+                # 1. 이미 게시된 공고 메시지가 있는지 확인
+                existing_messages = recruitment_messages.get(recruitment_id, [])
+                existing_message = None if not existing_messages else existing_messages[0]
+                needs_update = False
+                
+                if existing_message:
+                    # 기존 메시지가 있으면 업데이트가 필요한지 확인
+                    needs_update = await self.check_announcement_needs_update(existing_message, recruitment)
+                    logger.info(f"[DEBUG] 모집 {recruitment_id} 업데이트 필요 여부: {needs_update}")
+                
+                # 2. 모집 View 생성 및 값 설정
+                view = RecruitmentCard(self.dungeons, self.db)
+                # 모집 ID 설정
+                view.recruitment_id = recruitment_id
+                # 모집 상태 설정
+                view.status = recruitment.get("status", "active")
+                
+                # *** 중요: 모집 데이터에서 값 설정 추가 ***
+                # 던전 정보 설정
+                view.selected_type = recruitment.get("type")
+                view.selected_kind = recruitment.get("dungeon")
+                view.selected_diff = recruitment.get("difficulty")
+                # 모집 내용 설정
+                view.recruitment_content = recruitment.get("description")
+                # 최대 인원수 설정
+                view.max_participants = recruitment.get("max_participants")
+                # 참가자 목록 설정 (문자열 ID를 정수로 변환)
+                participants = recruitment.get("participants", [])
+                view.participants = [int(p) if isinstance(p, str) and p.isdigit() else p for p in participants]
+                # 모집자 ID 설정
+                view.creator_id = recruitment.get("creator_id")
+                # 공고 채널 ID 설정
+                view.announcement_channel_id = announcement_channel_id
+                # 공고 메시지 ID 설정
+                view.announcement_message_id = announcement_message_id
+                # 등록 채널 ID 설정
+                view.registration_channel_id = registration_channel_id
+                
+                # 3. 상황에 따라 메시지 생성 또는 업데이트
+                if existing_message and not needs_update:
+                    # 기존 메시지가 있고 업데이트가 필요 없는 경우, 상호작용(버튼/선택메뉴)만 업데이트
+                    logger.info(f"[DEBUG] 모집 {recruitment_id}의 상호작용만 업데이트합니다")
+                    try:
+                        # 메시지 객체를 view에 연결
+                        view.message = existing_message
                         
-                        if needs_update:
-                            try:
-                                logger.info(f"채널 {channel.id}의 모집 {recruitment_id} 공고 업데이트 시도")
-                                
-                                # 기존 메시지 삭제
-                                await existing_message.delete()
-                                
-                                # 새 공고 게시
-                                await self.create_recruitment_announcement(guild_id, recruitment)
-                                
-                            except Exception as e:
-                                logger.error(f"모집 공고 업데이트 중 오류 발생: {e}")
-                                logger.error(traceback.format_exc())
+                        # 기존 임베드는 그대로 유지하고 상호작용(view)만 업데이트
+                        await existing_message.edit(view=view)
+                        updated_count += 1
+                        logger.info(f"[DEBUG] 모집 {recruitment_id}의 상호작용 업데이트 완료")
+                    except Exception as e:
+                        logger.error(f"[DEBUG] 모집 {recruitment_id}의 상호작용 업데이트 중 오류: {e}")
+                        logger.error(traceback.format_exc())
+                else:
+                    # 기존 메시지가 없거나 업데이트가 필요한 경우
+                    if existing_message:
+                        logger.info(f"[DEBUG] 모집 {recruitment_id}의 내용이 변경되어 완전히 업데이트합니다")
+                        try:
+                            # 기존 메시지 삭제
+                            await existing_message.delete()
+                            deleted_count += 1
+                            logger.info(f"[DEBUG] 기존 메시지 {existing_message.id} 삭제 완료")
+                        except Exception as e:
+                            logger.error(f"[DEBUG] 기존 메시지 삭제 중 오류: {e}")
+                    else:
+                        logger.info(f"[DEBUG] 모집 {recruitment_id}의 새 공고 메시지를 생성합니다")
+                    
+                    # 새 메시지 생성
+                    try:
+                        result = await self.post_recruitment_announcement(guild_id, recruitment, view)
+                        if result:
+                            created_count += 1
+                            logger.info(f"[DEBUG] 모집 {recruitment_id}의 새 공고 생성 완료 (메시지 ID: {result.id})")
+                        else:
+                            logger.error(f"[DEBUG] 모집 {recruitment_id}의 새 공고 생성 실패")
+                    except Exception as e:
+                        logger.error(f"[DEBUG] 모집 {recruitment_id}의 새 공고 생성 중 오류: {e}")
+                        logger.error(traceback.format_exc())
             
-            logger.info(f"서버 {guild_id}의 채널 {channel.id}에서 활성 모집 처리 완료")
-            
+            logger.info(f"[DEBUG] 활성 모집 처리 완료 - 생성: {created_count}개, 상호작용 업데이트: {updated_count}개, 삭제: {deleted_count}개, 중복 삭제: {duplicate_deleted_count}개")
+            return True
         except Exception as e:
-            logger.error(f"활성 모집 처리 중 오류 발생: {e}")
+            logger.error(f"process_active_recruitments 오류: {e}")
             logger.error(traceback.format_exc())
+            return False
 
     async def create_recruitment_announcement(self, guild_id, recruitment_data):
         """모집 정보를 바탕으로 공고를 새로 생성합니다."""
@@ -1341,46 +1355,36 @@ class PartyCog(commands.Cog):
         self.refresh_registration_forms.cancel()  # 새로 추가된 양식 갱신 작업 취소
         logger.info("Party cog unloaded")
 
-    @tasks.loop(minutes=1)  # 10분마다 실행
+    @tasks.loop(minutes=10)  # 10분마다 실행
     async def initialize_and_cleanup(self):
-        """봇의 상태를 체크하고 채널을 초기화 및 정리하는 메서드"""
+        logger.info("[DEBUG] 채널 초기화 및 정리 시작")
         try:
-            logger.info("봇 상태 체크 및 채널 초기화/정리 시작")
-            
-            # 기존 체크 로직
-            logger.info(f"연결된 서버 수: {len(self.bot.guilds)}")
-            
+            # 모든 서버에 대해 채널 초기화 및 정리 수행
             for guild in self.bot.guilds:
-                logger.debug(f"서버 연결 확인: {guild.name} (ID: {guild.id})")
-                
-                # 채널이 초기화되어 있지 않은 경우 초기화 시도
-                if (str(guild.id) not in self.announcement_channels) or (str(guild.id) not in self.registration_channels):
-                    logger.info(f"서버 {guild.id}의 채널이 초기화되어 있지 않습니다. 초기화를 시도합니다.")
-                
-            # 채널 초기화 및 정리 작업 추가
-            await self.initialize_channels(force_retry=True)
-            
-            # 채널 정리 작업 수행
-            if self.announcement_channels:
-                for guild_id, channel_id in self.announcement_channels.items():
-                    try:
-                        logger.debug(f"서버 {guild_id}의 채널 정리 작업 시작")
-                        await self.force_cleanup_channel(guild_id, channel_id)
-                    except Exception as e:
-                        logger.error(f"서버 {guild_id}의 강제 정리 중 오류 발생: {e}")
-                        logger.error(traceback.format_exc())
-            
-            # 초기화 재시도 카운터 확인
-            failed_servers = {guild_id: retries for guild_id, retries in self.initialization_retries.items() 
-                             if retries["registration"] > 0 or retries["announcement"] > 0}
-            
-            if failed_servers:
-                logger.warning(f"{len(failed_servers)}개의 서버에서 초기화가 필요합니다. 하지만 자동 초기화는 비활성화되어 있습니다.")
-            
-            logger.info("봇 상태 체크 및 채널 초기화/정리 완료")
-            
+                try:
+                    logger.info(f"[DEBUG] 서버 {guild.id} 처리 시작")
+                    # 채널 초기화
+                    await self.initialize_channels(force_retry=True)
+                    
+                    # 활성 모집 처리
+                    active_recruitments = await self.get_recruitments_by_guild(str(guild.id), status="active")
+                    if active_recruitments:
+                        logger.info(f"[DEBUG] 서버 {guild.id}의 활성 모집 {len(active_recruitments)}개 발견")
+                        for channel_id in self.announcement_channels.get(str(guild.id), []):
+                            channel = guild.get_channel(int(channel_id))
+                            if channel:
+                                await self.process_active_recruitments(guild, str(guild.id), active_recruitments, channel)
+                    
+                    # 채널 정리
+                    for channel_id in self.announcement_channels.get(str(guild.id), []):
+                        await self.force_cleanup_channel(str(guild.id), channel_id)
+                        
+                except Exception as e:
+                    logger.error(f"[DEBUG] 서버 {guild.id} 처리 중 오류: {e}")
+                    continue
+                    
         except Exception as e:
-            logger.error(f"initialize_and_cleanup 작업 중 오류 발생: {e}")
+            logger.error(f"[DEBUG] initialize_and_cleanup 전체 오류: {e}")
             logger.error(traceback.format_exc())
 
     @initialize_and_cleanup.before_loop
