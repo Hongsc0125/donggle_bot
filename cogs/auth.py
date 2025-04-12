@@ -480,25 +480,32 @@ class AuthCog(commands.Cog):
             
             if auth_role and auth_role in user.roles:
                 # 재인증 여부 확인
-                await interaction.response.send_message(
-                    "이미 인증이 완료되었습니다. 다시 설정하시겠습니까?",
-                    view=ReauthConfirmView(self),
-                    ephemeral=True
-                )
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "이미 인증이 완료되었습니다. 다시 설정하시겠습니까?",
+                        view=ReauthConfirmView(self),
+                        ephemeral=True
+                    )
                 return
             
             # 인증 프로세스 시작
             view = AuthView(self)
-            await interaction.response.send_message(
-                "서버를 선택해주세요.",
-                view=view,
-                ephemeral=True
-            )
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "서버를 선택해주세요.",
+                    view=view,
+                    ephemeral=True
+                )
             logger.info(f"사용자 {user.id} 권한 설정 시작")
+        except discord.errors.NotFound:
+            logger.error("Interaction이 만료되었거나 알 수 없는 상태입니다.")
+        except discord.errors.HTTPException as e:
+            logger.error(f"Interaction 응답 중 오류 발생: {e}")
         except Exception as e:
             logger.error(f"권한 명령어 실행 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
-            await interaction.response.send_message("명령어 실행 중 오류가 발생했습니다.", ephemeral=True)
+            if not interaction.response.is_done():
+                await interaction.response.send_message("명령어 실행 중 오류가 발생했습니다.", ephemeral=True)
     
     @app_commands.command(name="test", description="테스트 명령어입니다.")
     async def test_command(self, interaction: discord.Interaction):
@@ -636,4 +643,4 @@ class ReauthConfirmView(discord.ui.View):
         await interaction.response.edit_message(content="인증 설정이 취소되었습니다.", view=None)
 
 async def setup(bot):
-    await bot.add_cog(AuthCog(bot)) 
+    await bot.add_cog(AuthCog(bot))

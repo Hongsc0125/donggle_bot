@@ -433,8 +433,28 @@ class ThreadArchiveView(discord.ui.View):
             # 스레드 보관 기간 설정 및 이름 변경
             thread = interaction.channel
             try:
-                await thread.edit(name=thread_name, auto_archive_duration=duration_minutes)
-                print(f"[INFO] 스레드 이름을 '{thread_name}'으로 변경하고 보관 기간을 {duration_minutes}분으로 설정했습니다.")
+                # 스레드를 보관하지 않고 삭제 예약 시간 저장
+                delete_after = datetime.datetime.now() + datetime.timedelta(minutes=duration_minutes)
+                
+                # 이름 변경만 수행하고 보관은 하지 않음
+                await thread.edit(name=thread_name)
+                print(f"[INFO] 스레드 이름을 '{thread_name}'으로 변경했습니다.")
+                
+                # DB에 삭제 예정 시간 저장
+                await self.db["recruitments"].update_one(
+                    {"_id": ObjectId(self.recruitment_id)},
+                    {"$set": {
+                        "thread_delete_at": delete_after.isoformat(),
+                        "thread_archive_duration": duration_minutes,
+                        "thread_status": "active",
+                        "thread_name": thread_name,
+                        "updated_at": now
+                    }}
+                )
+                
+                # 스레드 삭제 예약 (비동기 작업)
+                self.schedule_thread_deletion(thread, self.recruitment_id, duration_minutes, interaction.guild.id)
+                
             except Exception as e:
                 print(f"[WARNING] 스레드 이름 변경 중 오류 발생: {e}")
                 # 이름 변경 실패 시 보관 기간만 설정
@@ -568,6 +588,63 @@ class ThreadArchiveView(discord.ui.View):
             import traceback
             print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
             await interaction.followup.send("스레드 보관 기간 설정 중 오류가 발생했습니다.", ephemeral=True)
+
+    def schedule_thread_deletion(self, thread, recruitment_id, duration_minutes, guild_id):
+        """스레드를 일정 시간 후에 삭제하도록 예약합니다."""
+        async def delete_thread_later():
+            try:
+                # 지정된 시간(분) 동안 대기
+                await asyncio.sleep(duration_minutes * 60)
+                
+                # 스레드가 여전히 존재하는지 확인
+                try:
+                    # 스레드 정보 다시 가져오기
+                    guild = self.bot.get_guild(guild_id)
+                    if not guild:
+                        print(f"[ERROR] 스레드 삭제 실패: 서버를 찾을 수 없음 (ID: {guild_id})")
+                        return
+                    
+                    # 채널 ID로 스레드 찾기
+                    fetched_thread = guild.get_thread(thread.id)
+                    if fetched_thread:
+                        # 연결된 음성 채널 찾기 및 삭제
+                        try:
+                            recruitment = await self.db["recruitments"].find_one({"_id": ObjectId(recruitment_id)})
+                            if recruitment and "voice_channel_id" in recruitment:
+                                voice_channel_id = recruitment["voice_channel_id"]
+                                voice_channel = guild.get_channel(int(voice_channel_id))
+                                if voice_channel:
+                                    await voice_channel.delete(reason="스레드 자동 삭제에 의한 음성 채널 삭제")
+                                    print(f"[INFO] 음성 채널 {voice_channel.id} 삭제 완료")
+                        except Exception as voice_error:
+                            print(f"[ERROR] 음성 채널 삭제 중 오류: {voice_error}")
+                        
+                        # 스레드 삭제
+                        await fetched_thread.delete()
+                        print(f"[INFO] 스레드 {thread.id} 자동 삭제 완료")
+                        
+                        # 모집 정보 상태 업데이트
+                        await self.db["recruitments"].update_one(
+                            {"_id": ObjectId(recruitment_id)},
+                            {"$set": {
+                                "thread_status": "deleted",
+                                "updated_at": datetime.datetime.now().isoformat()
+                            }}
+                        )
+                    else:
+                        print(f"[INFO] 스레드 {thread.id}가 이미 삭제되었습니다.")
+                except discord.NotFound:
+                    print(f"[INFO] 스레드 {thread.id}가 이미 삭제되었습니다.")
+                except Exception as thread_error:
+                    print(f"[ERROR] 스레드 삭제 확인 중 오류: {thread_error}")
+                    print(traceback.format_exc())
+            except Exception as e:
+                print(f"[ERROR] 스레드 자동 삭제 작업 중 오류 발생: {e}")
+                print(traceback.format_exc())
+        
+        # 비동기 작업 시작
+        asyncio.create_task(delete_thread_later())
+        print(f"[INFO] 스레드 {thread.id}가 {duration_minutes}분 후 삭제되도록 예약되었습니다.")
 
     async def force_cleanup_channel(self, guild_id, channel_id):
         """특정 채널의 완료된 모집 메시지를 강제로 삭제합니다."""

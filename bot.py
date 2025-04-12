@@ -45,6 +45,7 @@ class DonggleBot(commands.Bot):
         self.heartbeat_logger.start()
         self.update_presence.start()
         self.check_connection.start()
+        self.cleanup_old_threads_and_channels.start()
         
     async def setup_hook(self):
         # 확장 기능 로드
@@ -185,6 +186,25 @@ class DonggleBot(commands.Bot):
                 voice_channel_id = recruitment.get("voice_channel_id")
                 if not voice_channel_id:
                     logger.info(f"스레드 {after.id}와 연결된 음성 채널이 없습니다.")
+                    
+                    # 음성 채널은 없지만 스레드가 아카이브되었으므로 스레드 완전 삭제 시도
+                    try:
+                        # 스레드 완전 삭제
+                        await after.delete()
+                        logger.info(f"아카이브된 스레드 {after.id} 삭제 완료")
+                        
+                        # 모집 정보 업데이트
+                        await party_cog.db["recruitments"].update_one(
+                            {"_id": recruitment["_id"]},
+                            {"$set": {
+                                "thread_status": "deleted",
+                                "updated_at": datetime.datetime.now().isoformat()
+                            }}
+                        )
+                    except Exception as e:
+                        logger.error(f"아카이브된 스레드 삭제 중 오류 발생: {e}")
+                        logger.error(traceback.format_exc())
+                    
                     return
                 
                 # 음성 채널 찾기
@@ -196,6 +216,22 @@ class DonggleBot(commands.Bot):
                         logger.info(f"음성 채널 {voice_channel.id} 삭제 완료")
                     else:
                         logger.warning(f"음성 채널 {voice_channel_id}를 찾을 수 없습니다.")
+                        
+                        # 음성 채널을 찾을 수 없는 경우 재시도
+                        try:
+                            # 채널 ID 재확인
+                            all_channels = list(after.guild.channels)
+                            logger.info(f"모든 채널 목록: {[c.id for c in all_channels]}")
+                            
+                            # 보이스 채널 직접 검색
+                            for channel in all_channels:
+                                if channel.id == int(voice_channel_id):
+                                    logger.info(f"보이스 채널 {channel.id} 발견, 삭제 시도")
+                                    await channel.delete(reason="연결된 스레드가 아카이브됨 (재시도)")
+                                    logger.info(f"보이스 채널 {channel.id} 삭제 완료")
+                                    break
+                        except Exception as retry_error:
+                            logger.error(f"보이스 채널 재시도 삭제 중 오류: {retry_error}")
                 except Exception as e:
                     logger.error(f"음성 채널 삭제 중 오류 발생: {e}")
                     logger.error(traceback.format_exc())
@@ -206,6 +242,19 @@ class DonggleBot(commands.Bot):
                     {"$unset": {"voice_channel_id": "", "voice_channel_name": ""},
                      "$set": {"thread_status": "archived", "updated_at": datetime.datetime.now().isoformat()}}
                 )
+                
+                # 아카이브된 스레드 완전 삭제 시도
+                try:
+                    await after.delete()
+                    logger.info(f"아카이브된 스레드 {after.id} 삭제 완료")
+                    
+                    # 모집 정보 상태 업데이트
+                    await party_cog.db["recruitments"].update_one(
+                        {"_id": recruitment["_id"]},
+                        {"$set": {"thread_status": "deleted", "updated_at": datetime.datetime.now().isoformat()}}
+                    )
+                except Exception as thread_delete_error:
+                    logger.error(f"아카이브된 스레드 삭제 중 오류 발생: {thread_delete_error}")
         except Exception as e:
             logger.error(f"스레드 업데이트 처리 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
@@ -276,10 +325,93 @@ class DonggleBot(commands.Bot):
         except Exception as e:
             logger.error(f"상태 업데이트 중 오류 발생: {str(e)}")
     
+    @tasks.loop(hours=2)
+    async def cleanup_old_threads_and_channels(self):
+        """2시간마다 오래된 스레드와 음성 채널을 정리합니다."""
+        try:
+            logger.info("오래된 스레드 및 음성 채널 정리 시작")
+            
+            # PartyCog 가져오기
+            party_cog = self.get_cog('PartyCog')
+            if not party_cog or not party_cog.db:
+                logger.warning("PartyCog 또는 DB 연결을 찾을 수 없어 정리 작업을 건너뜁니다.")
+                return
+            
+            # 삭제 시간이 지난 모집 정보 찾기
+            now = datetime.datetime.now().isoformat()
+            query = {
+                "thread_delete_at": {"$lt": now},
+                "thread_status": {"$in": ["active", "archived"]},
+                "thread_id": {"$exists": True}
+            }
+            
+            old_recruitments = await party_cog.db["recruitments"].find(query).to_list(None)
+            logger.info(f"삭제할 오래된 스레드 {len(old_recruitments)}개 발견")
+            
+            delete_count = 0
+            for recruitment in old_recruitments:
+                try:
+                    guild_id = recruitment.get("guild_id")
+                    thread_id = recruitment.get("thread_id")
+                    voice_channel_id = recruitment.get("voice_channel_id")
+                    
+                    if not guild_id or not thread_id:
+                        continue
+                    
+                    # 길드 찾기
+                    guild = self.get_guild(int(guild_id))
+                    if not guild:
+                        logger.warning(f"서버를 찾을 수 없음: {guild_id}")
+                        continue
+                    
+                    # 스레드 찾기 및 삭제
+                    deleted_thread = False
+                    try:
+                        thread = guild.get_thread(int(thread_id))
+                        if thread:
+                            await thread.delete()
+                            logger.info(f"오래된 스레드 {thread_id} 삭제 완료")
+                            deleted_thread = True
+                    except discord.NotFound:
+                        logger.info(f"스레드 {thread_id}가 이미 삭제되어 있습니다.")
+                        deleted_thread = True
+                    except Exception as thread_error:
+                        logger.error(f"스레드 {thread_id} 삭제 중 오류: {thread_error}")
+                    
+                    # 음성 채널 찾기 및 삭제
+                    if voice_channel_id:
+                        try:
+                            voice_channel = guild.get_channel(int(voice_channel_id))
+                            if voice_channel:
+                                await voice_channel.delete(reason="오래된 스레드 정리에 의한 음성 채널 삭제")
+                                logger.info(f"음성 채널 {voice_channel_id} 삭제 완료")
+                        except Exception as voice_error:
+                            logger.error(f"음성 채널 {voice_channel_id} 삭제 중 오류: {voice_error}")
+                    
+                    # 모집 정보 업데이트
+                    if deleted_thread:
+                        await party_cog.db["recruitments"].update_one(
+                            {"_id": recruitment["_id"]},
+                            {"$set": {
+                                "thread_status": "deleted",
+                                "updated_at": datetime.datetime.now().isoformat()
+                            }, "$unset": {"voice_channel_id": "", "voice_channel_name": ""}}
+                        )
+                        delete_count += 1
+                except Exception as e:
+                    logger.error(f"모집 정보 처리 중 오류 발생: {e}")
+                    continue
+            
+            logger.info(f"총 {delete_count}개의 오래된 스레드와 음성 채널이 정리되었습니다.")
+        except Exception as e:
+            logger.error(f"오래된 스레드 및 음성 채널 정리 중 오류 발생: {e}")
+            logger.error(traceback.format_exc())
+    
     # 봇이 준비된 후에 작업 시작
     @heartbeat_logger.before_loop
     @update_presence.before_loop
     @check_connection.before_loop
+    @cleanup_old_threads_and_channels.before_loop
     async def before_tasks(self):
         await self.wait_until_ready()
 
