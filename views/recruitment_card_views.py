@@ -536,7 +536,7 @@ class ThreadArchiveView(discord.ui.View):
             
             # 참가자 초대 메시지
             if participants:
-                invite_message = "**🎮 파티원 초대 알림**\n"
+                invite_message = "\n\n**🎮 파티원 초대 알림**\n"
                 for p_id in participants:
                     invite_message += f"<@{p_id}> "
                 invite_message += "\n\n파티가 결성되었습니다! 활발한 소통 부탁드립니다. 😊"
@@ -546,6 +546,23 @@ class ThreadArchiveView(discord.ui.View):
             else:
                 await thread.send("**🎮 파티가 결성되었습니다!** 활발한 소통 부탁드립니다. 😊")
             
+            # 음성 채널 ID 가져오기 - 비동기 호출을 올바르게 처리
+            recruitment_info = await self.db["recruitments"].find_one(
+                {"_id": ObjectId(self.recruitment_id)},
+                {"voice_channel_id": 1}
+            )
+            voice_channel_id = recruitment_info.get("voice_channel_id") if recruitment_info else None
+            
+            # 음성 채널 ID가 있는 경우에만 버튼 추가
+            if voice_channel_id:
+                # 음성 채널 참여 버튼 생성용 뷰 가져오기
+                from views.recruitment_card_views import VoiceChannelView
+                
+                # 음성 채널 참여 버튼 추가
+                voice_view = VoiceChannelView(voice_channel_id)
+                voice_msg = await thread.send("🔊 **파티 음성 채널에 참여하세요!**", view=voice_view)
+                print(f"[DEBUG] 음성 채널 참여 버튼 생성 완료: 메시지 ID={voice_msg.id}")
+        
         except Exception as e:
             print(f"[ERROR] 스레드 보관 기간 설정 중 오류 발생: {e}")
             import traceback
@@ -644,7 +661,7 @@ class ThreadArchiveView(discord.ui.View):
                     # 임베드의 필드에서 모집 ID 찾기 (이전 방식 호환)
                     if not recruitment_id:
                         for field in embed.fields:
-                            if field.name == "모집 ID":
+                            if (field.name == "모집 ID"):
                                 recruitment_id = field.value.strip()
                                 logger.info(f"필드에서 모집 ID를 추출했습니다: {recruitment_id}")
                                 break
@@ -666,3 +683,136 @@ class ThreadArchiveView(discord.ui.View):
         except Exception as e:
             logger.error(f"강제 채널 정리 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
+
+
+# 음성 채널 참여 버튼 클래스
+class VoiceChannelJoinButton(discord.ui.Button):
+    def __init__(self, voice_channel_id):
+        super().__init__(
+            style=discord.ButtonStyle.success,
+            label="임시 음성채팅 참여",
+            emoji="🔊",
+            custom_id=f"voice_join_{voice_channel_id}"
+        )
+        self.voice_channel_id = voice_channel_id
+    
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            # 음성 채널 찾기
+            voice_channel = interaction.guild.get_channel(int(self.voice_channel_id))
+            if not voice_channel:
+                await interaction.response.send_message("음성 채널을 찾을 수 없습니다.", ephemeral=True)
+                return
+            
+            # member 객체 가져오기 및 None 체크 추가
+            member = interaction.guild.get_member(interaction.user.id)
+            if not member:
+                # 멤버를 찾을 수 없는 경우 (캐시 문제일 수 있음)
+                try:
+                    # 멤버 페치 시도
+                    member = await interaction.guild.fetch_member(interaction.user.id)
+                    if not member:
+                        await interaction.response.send_message("서버에서 사용자 정보를 찾을 수 없습니다.", ephemeral=True)
+                        return
+                except discord.NotFound:
+                    await interaction.response.send_message("서버에서 사용자를 찾을 수 없습니다.", ephemeral=True)
+                    return
+                except Exception as e:
+                    print(f"[ERROR] 사용자 정보 조회 중 오류 발생: {e}")
+                    await interaction.response.send_message("사용자 정보를 확인하는 중 오류가 발생했습니다.", ephemeral=True)
+                    return
+            
+            # voice 속성이 있는지 확인 (더 안전한 방어 코드 추가)
+            if not hasattr(member, 'voice'):
+                print(f"[WARNING] 멤버 객체에 voice 속성이 없습니다. 멤버 ID: {member.id}, 타입: {type(member)}")
+                await interaction.response.send_message(
+                    f"음성 채널 상태를 확인할 수 없습니다. 직접 {voice_channel.mention} 채널에 접속해주세요.",
+                    ephemeral=True
+                )
+                return
+            
+            # 사용자가 이미 음성 채널에 있는지 확인 (안전하게 속성 체크)
+            in_target_channel = (
+                member.voice is not None and 
+                member.voice.channel is not None and 
+                member.voice.channel.id == voice_channel.id
+            )
+            
+            if in_target_channel:
+                await interaction.response.send_message("이미 해당 음성 채널에 접속해 있습니다.", ephemeral=True)
+                return
+            
+            # 사용자가 현재 음성 채널에 있는지 확인
+            if member.voice and member.voice.channel:
+                try:
+                    # 사용자 음성 상태 다시 확인 (이동 직전 다시 체크)
+                    if not member.voice or not member.voice.channel:
+                        await interaction.response.send_message(
+                            f"음성 채널에 연결되어 있지 않습니다. 먼저 디스코드 음성에 접속한 후, {voice_channel.mention} 채널로 이동해주세요.",
+                            ephemeral=True
+                        )
+                        return
+                        
+                    # 이동 권한 확인
+                    permissions = voice_channel.permissions_for(interaction.guild.me)
+                    if permissions.move_members:
+                        try:
+                            await member.move_to(voice_channel)
+                            await interaction.response.send_message(f"{voice_channel.name} 음성 채널로 이동했습니다.", ephemeral=True)
+                        except discord.errors.HTTPException as http_error:
+                            # 음성 채널 연결 끊김 처리
+                            if http_error.code == 40032:  # Target user is not connected to voice
+                                await interaction.response.send_message(
+                                    f"음성 채널 연결이 끊어졌습니다. 다시 접속 후 {voice_channel.mention} 채널로 이동해주세요.",
+                                    ephemeral=True
+                                )
+                            else:
+                                raise http_error
+                    else:
+                        await interaction.response.send_message(
+                            f"봇에 사용자를 이동시킬 권한이 없습니다. 직접 {voice_channel.mention} 채널에 접속해주세요.", 
+                            ephemeral=True
+                        )
+                except Exception as e:
+                    print(f"[ERROR] 사용자 음성 채널 이동 중 오류: {e}")
+                    await interaction.response.send_message(
+                        f"음성 채널로 이동할 수 없습니다. 직접 {voice_channel.mention} 채널에 접속해주세요.", 
+                        ephemeral=True
+                    )
+            else:
+                # 사용자가 음성 채널에 없는 경우
+                # 직접 참여할 수 있는 임베드 메시지 제공
+                embed = discord.Embed(
+                    title="음성 채널 참여",
+                    description=f"{voice_channel.mention} 채널을 눌러 바로 참여할 수 있습니다. 또는 아래 링크를 클릭하세요.",
+                    color=discord.Color.green()
+                )
+                
+                # 채널 링크 형식 생성 (디스코드의 채널 연결 링크)
+                channel_link = f"https://discord.com/channels/{interaction.guild.id}/{voice_channel.id}"
+                
+                # 버튼 뷰 생성
+                view = discord.ui.View()
+                view.add_item(discord.ui.Button(
+                    label="음성 채널 참여하기", 
+                    style=discord.ButtonStyle.link, 
+                    url=channel_link
+                ))
+                
+                await interaction.response.send_message(
+                    embed=embed,
+                    view=view,
+                    ephemeral=True
+                )
+                
+        except Exception as e:
+            print(f"[ERROR] 음성 채널 참여 중 오류 발생: {e}")
+            import traceback
+            print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
+            await interaction.response.send_message("음성 채널 참여 중 오류가 발생했습니다.", ephemeral=True)
+
+# 임시 음성 채널 관리 뷰
+class VoiceChannelView(discord.ui.View):
+    def __init__(self, voice_channel_id):
+        super().__init__(timeout=None)
+        self.add_item(VoiceChannelJoinButton(voice_channel_id))

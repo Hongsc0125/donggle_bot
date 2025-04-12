@@ -4,6 +4,7 @@ from views.recruitment_card_views import RecruitmentModal
 import datetime
 from core.config import settings
 import asyncio
+import traceback  # traceback 모듈 추가
 from bson.objectid import ObjectId
 from core.logger import logger
 
@@ -612,22 +613,26 @@ class RecruitmentCard(ui.View):
                 await asyncio.sleep(2)
                 await msg.delete()
 
-    async def create_private_thread(self, interaction: discord.Interaction):
+    async def create_private_thread(self, interaction: discord.Interaction, creator_id=None, initiator_id=None):
         """모집 완료 시 비밀 스레드를 지정된 채널에 생성합니다."""
         try:
-            # 모집자 ID 가져오기 (첫 번째 참가자가 모집자)
-            creator_id = int(self.participants[0]) if self.participants else None
+            # 전달된 creator_id가 없으면 첫 번째 참가자를 모집자로 사용
+            if creator_id is None:
+                creator_id = int(self.participants[0]) if self.participants else None
             
-            logger.debug(f"스레드 생성 시작 - 모집자 ID: {creator_id}")
+            # 이 작업을 시작한 사용자 ID 기록 (디버깅용)
+            actual_initiator = initiator_id or interaction.user.id
+            
+            logger.debug(f"스레드 생성 시작 - 모집자 ID: {creator_id}, 액션 수행자 ID: {actual_initiator}")
             
             # 모집자만 스레드 생성 가능하도록 체크
-            if interaction.user.id != creator_id:
-                if not interaction.response.is_done():
-                    await interaction.response.defer(ephemeral=True)
-                msg = await interaction.followup.send("모집자만 스레드를 생성할 수 있습니다.", ephemeral=True)
-                await asyncio.sleep(2)
-                await msg.delete()
-                return
+            # if interaction.user.id != creator_id:
+            #     if not interaction.response.is_done():
+            #         await interaction.response.defer(ephemeral=True)
+            #     msg = await interaction.followup.send("모집자만 스레드를 생성할 수 있습니다.", ephemeral=True)
+            #     await asyncio.sleep(2)
+            #     await msg.delete()
+            #     return
             
             # 스레드 이름 생성
             thread_name = f"{self.selected_kind} {self.selected_diff}"
@@ -659,14 +664,19 @@ class RecruitmentCard(ui.View):
                 )
                 logger.debug(f"비밀 스레드 생성 성공 - 스레드 ID: {thread.id}")
                 
-                # 참가자들 자동 추가
-                for participant_id in self.participants:
-                    try:
-                        member = guild.get_member(int(participant_id))
-                        if member:
-                            await thread.add_user(member)
-                    except Exception as e:
-                        logger.error(f"참가자 추가 실패 (ID: {participant_id}): {e}")
+                # 모집자를 제외한 다른 참가자들 (초대될 사람들)
+                other_participants = [p for p in self.participants if int(p) != creator_id]
+                logger.debug(f"초대할 참가자 수: {len(other_participants)}")
+                
+                # 참가자를 직접 추가하지 않고 초대 메시지만 전송
+                # if other_participants:
+                #     # 초대 메시지에 모집자만 멘션
+                #     mentions = " ".join([f"<@{p}>" for p in other_participants])
+                #     await thread.send(
+                #         f"{mentions}\n"
+                #         f"**{self.selected_kind} {self.selected_diff}** 파티 스레드에 초대되었습니다.\n"
+                #         f"이 메시지를 확인하면 자동으로 스레드에 참여됩니다."
+                #     )
                 
             except discord.Forbidden:
                 logger.error("스레드 생성 실패 - 권한 부족")
@@ -685,7 +695,7 @@ class RecruitmentCard(ui.View):
                 await msg.delete()
                 return
             
-            # 스레드 ID 저장
+            # 스레드 ID 저장 (음성 채널 연동을 위해 thread_id를 확실히 저장)
             now = datetime.datetime.now().isoformat()
             try:
                 await self.db["recruitments"].update_one(
@@ -704,7 +714,116 @@ class RecruitmentCard(ui.View):
                 logger.error(f"스레드 정보 DB 저장 실패: {e}")
                 # DB 저장 실패해도 스레드 생성은 계속 진행
             
+            # ================ 비밀 음성 채널 생성 로직 추가 ================
+            voice_channel = None
+            try:
+                logger.debug("비밀 임시 음성 채널 생성 시작")
+                
+                # 음성 채널을 생성할 카테고리 찾기 - 스레드의 부모 채널과 동일한 카테고리 사용
+                category = thread.parent.category
+                if not category:
+                    logger.warning("스레드 부모 채널의 카테고리를 찾을 수 없습니다. 기본 카테고리를 사용합니다.")
+                    # 기본 카테고리가 없으면 채널이 속한 첫 번째 카테고리 사용
+                    for category_obj in interaction.guild.categories:
+                        category = category_obj
+                        break
+                
+                logger.debug(f"음성 채널 생성 카테고리: {category.name if category else '없음'}")
+                
+                # 비밀 음성 채널 생성
+                voice_channel = await interaction.guild.create_voice_channel(
+                    name=f"🔊 {thread_name}",
+                    category=category,
+                    user_limit=len(self.participants) or 4,  # 참가자 수로 제한, 기본값 4
+                    reason="파티 음성 채팅"
+                )
+                
+                logger.debug(f"음성 채널 생성 성공: {voice_channel.name} (ID: {voice_channel.id})")
+                
+                # 채널 권한 설정 - 기본적으로 모든 사용자에게 비공개
+                await voice_channel.set_permissions(
+                    interaction.guild.default_role,
+                    view_channel=False,  # 채널을 볼 수 없음
+                    connect=False        # 연결할 수 없음
+                )
+                
+                logger.debug("음성 채널 기본 권한 설정 완료")
+                
+                # 봇에게 권한 부여
+                await voice_channel.set_permissions(
+                    interaction.guild.me,
+                    view_channel=True,
+                    connect=True,
+                    speak=True,
+                    move_members=True,
+                    manage_channels=True  # 채널 관리 권한 추가
+                )
+                
+                logger.debug("봇 권한 설정 완료")
+                
+                # 참가자들에게 채널 접근 권한 부여
+                participants_with_access = 0
+                for participant_id in self.participants:
+                    try:
+                        member = interaction.guild.get_member(int(participant_id))
+                        if member:
+                            await voice_channel.set_permissions(
+                                member,
+                                view_channel=True,  # 채널을 볼 수 있음
+                                connect=True,       # 연결할 수 있음
+                                speak=True          # 말할 수 있음
+                            )
+                            participants_with_access += 1
+                            logger.debug(f"참가자 권한 설정 완료: {member.display_name}")
+                        else:
+                            logger.warning(f"참가자를 찾을 수 없음: {participant_id}")
+                            # 실패한 경우 API에서 직접 멤버 조회 시도
+                            try:
+                                fetched_member = await interaction.guild.fetch_member(int(participant_id))
+                                if fetched_member:
+                                    await voice_channel.set_permissions(
+                                        fetched_member,
+                                        view_channel=True,
+                                        connect=True,
+                                        speak=True
+                                    )
+                                    participants_with_access += 1
+                                    logger.debug(f"참가자 권한 설정 완료 (fetch): {fetched_member.display_name}")
+                            except Exception as fetch_error:
+                                logger.error(f"참가자 fetch 중 오류: {fetch_error}")
+                    except Exception as e:
+                        logger.warning(f"음성 채널 권한 설정 중 오류 (ID: {participant_id}): {e}")
+                
+                logger.info(f"비밀 음성 채널 생성 성공: {voice_channel.name} (ID: {voice_channel.id})")
+                logger.info(f"{participants_with_access}/{len(self.participants)} 참가자에게 권한 부여 완료")
+                
+                # DB에 음성 채널 정보 저장
+                await self.db["recruitments"].update_one(
+                    {"_id": ObjectId(self.recruitment_id)},
+                    {"$set": {
+                        "voice_channel_id": str(voice_channel.id),
+                        "voice_channel_name": voice_channel.name,
+                        "updated_at": now
+                    }}
+                )
+                logger.debug(f"음성 채널 정보 DB 저장 성공 - 채널 ID: {voice_channel.id}")
+                
+                # # 음성 채널 참여 버튼 생성용 뷰 가져오기
+                # from views.recruitment_card_views import VoiceChannelView
+                
+                # # 음성 채널 참여 버튼 추가
+                # voice_view = VoiceChannelView(voice_channel.id)
+                # voice_msg = await thread.send("🔊 **파티 음성 채널에 참여하세요!**", view=voice_view)
+                # logger.debug(f"음성 채널 참여 버튼 생성 완료: 메시지 ID={voice_msg.id}")
+                
+            except Exception as e:
+                logger.error(f"비밀 음성 채널 생성 중 오류: {e}")
+                logger.error(traceback.format_exc())
+                voice_channel = None
+            # ================ 비밀 음성 채널 생성 로직 끝 ================
+            
             # 스레드 설정용 뷰 생성
+            from views.recruitment_card_views import ThreadArchiveView
             archive_view = ThreadArchiveView(
                 self.recruitment_id, 
                 self.participants, 
@@ -717,21 +836,35 @@ class RecruitmentCard(ui.View):
             
             try:
                 # 스레드에 보관 기간 설정 메시지 전송
-                await thread.send(f"<@{creator_id}> 스레드 보관 기간을 설정해주세요.", view=archive_view)
+                archive_msg = await thread.send(f"<@{creator_id}> 스레드 보관 기간을 설정해주세요.", view=archive_view)
+                logger.debug(f"스레드 보관 기간 설정 메시지 전송 완료: {archive_msg.id}")
                 
-                # 모집에 참여한 사람들 멘션
-                if len(self.participants) > 1:
-                    mentions = " ".join([f"<@{p_id}>" for p_id in self.participants])
-                    await thread.send(f"**모집이 완료되었습니다!**\n{mentions}\n이 쓰레드에서 대화를 이어가세요.")
+                # 모집에 참여한 사람들 멘션 - 개별 초대 메시지로 변경하므로 제거
+                # 대신 모집 정보만 전송
+                info_message = "\n\n **🎮 스레드 보관 기간**을 선택하면 참여자들이 초대됩니다."
+                # if voice_channel:
+                #     info_message += f"\n\n🔊 **음성 채널**도 생성되었으니 위 버튼을 눌러 참여해보세요!"
+                
+                # 정보 메시지 전송
+                info_msg = await thread.send(info_message)
+                logger.debug(f"파티 정보 메시지 전송 완료: {info_msg.id}")
                 
                 logger.debug("스레드 초기 메시지 전송 성공")
                 
                 # 모집자에게만 비밀 메시지로 알림 (ephemeral)
                 if not interaction.response.is_done():
                     await interaction.response.defer(ephemeral=True)
-                await interaction.followup.send(f"비밀 스레드가 생성되었습니다: {thread.jump_url}", ephemeral=True)
+                    
+                # 음성 채널 정보 포함 알림
+                notification_text = f"비밀 스레드가 생성되었습니다: {thread.jump_url}"
+                if voice_channel:
+                    notification_text += f"\n음성 채널도 함께 생성되었습니다: {voice_channel.mention}"
+                
+                await interaction.followup.send(notification_text, ephemeral=True)
+                
             except Exception as e:
                 logger.error(f"스레드 초기 메시지 전송 실패: {e}")
+                logger.error(traceback.format_exc())
                 # 메시지 전송 실패해도 스레드 생성은 완료된 것으로 간주
                 if not interaction.response.is_done():
                     await interaction.response.defer(ephemeral=True)
@@ -739,8 +872,7 @@ class RecruitmentCard(ui.View):
             
         except Exception as e:
             logger.error(f"스레드 생성 중 오류 발생: {e}")
-            import traceback
-            logger.error(f"상세 오류: {traceback.format_exc()}")
+            logger.error(traceback.format_exc())
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
             msg = await interaction.followup.send("스레드 생성 중 오류가 발생했습니다.", ephemeral=True)
@@ -866,8 +998,16 @@ class RecruitmentCard(ui.View):
                         embed = self.get_embed()
                         await interaction.message.edit(embed=embed, view=self)
                         
-                        # 비밀 스레드 생성
-                        await self.create_private_thread(interaction)
+                        # 비밀 스레드 생성 - interaction 대신 필요한 정보들만 전달
+                        # 첫 번째 참가자(모집자) ID 가져오기
+                        creator_id = int(self.participants[0]) if self.participants else None
+                        
+                        # 스레드 생성에 필요한 정보만 전달
+                        await self.create_private_thread(
+                            interaction=interaction,
+                            creator_id=creator_id,
+                            initiator_id=interaction.user.id  # 실제 이 액션을 시작한 사용자
+                        )
                     else:
                         # 이미 완료 상태인 경우
                         logger.info(f"모집 ID {self.recruitment_id}는 이미 완료 상태입니다.")
