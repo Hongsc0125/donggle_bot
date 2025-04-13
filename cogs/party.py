@@ -6,7 +6,7 @@ import discord
 from discord import app_commands
 from typing import Union, Any
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from bson.objectid import ObjectId
 import uuid
 import aiosqlite
@@ -126,6 +126,7 @@ class PartyCog(commands.Cog):
         # 백그라운드 작업 시작
         self.initialize_and_cleanup.start()
         self.refresh_registration_forms.start()
+        self.cleanup_threads_and_voice_channels.start()  # 새로운 정리 태스크 추가
         
         # 설정 로드
         self.bot.loop.create_task(self._load_settings_async())
@@ -169,7 +170,6 @@ class PartyCog(commands.Cog):
                 elif channel_type == "registration" and "registration_channel_id" in settings:
                     channel_ids[guild_id] = settings["registration_channel_id"]
             
-            logger.info(f"{channel_type} 채널 ID를 로드했습니다: {channel_ids}")
             return channel_ids
             
         except Exception as e:
@@ -180,18 +180,12 @@ class PartyCog(commands.Cog):
     async def _load_settings_async(self):
         """채널 설정을 로드하고 초기화합니다."""
         try:
-            logger.info("채널 설정 로드 시작")
-            
             # 채널 ID 로드
             self.announcement_channels = await self._load_channel_id("announcement")
             self.registration_channels = await self._load_channel_id("registration")
             
             # 채널 페어 관계 로드
             await self._load_channel_pairs()
-            
-            logger.info(f"모집 공고 채널 ID 목록을 로드했습니다: {self.announcement_channels}")
-            logger.info(f"모집 등록 채널 ID 목록을 로드했습니다: {self.registration_channels}")
-            logger.info(f"채널 페어 관계를 로드했습니다: {self.channel_pairs}")
             
             # 허용된 길드 ID 설정 - 특정 두 개의 길드만 허용
             self.allowed_guild_ids = {
@@ -202,11 +196,6 @@ class PartyCog(commands.Cog):
             # 모든 서버를 허용하도록 수정
             for guild in self.bot.guilds:
                 self.allowed_guild_ids[str(guild.id)] = True
-                
-            logger.info(f"허용된 길드 ID 목록을 설정했습니다: {self.allowed_guild_ids}")
-            
-            # 채널 초기화는 on_ready 이벤트에서 수행하도록 변경
-            # 여기서 초기화를 수행하지 않음
             
         except Exception as e:
             logger.error(f"채널 설정 로드 중 오류 발생: {e}")
@@ -215,12 +204,10 @@ class PartyCog(commands.Cog):
     async def _load_dungeons_async(self):
         """데이터베이스에서 던전 목록을 비동기적으로 로드합니다."""
         try:
-            logger.info("던전 목록 로드 시작")
             # 던전 목록 가져오기
             dungeons_cursor = self.db["dungeons"].find({})
             self.dungeons = [doc async for doc in dungeons_cursor]
             self.dungeons.sort(key=lambda d: (d["type"], d["name"], d["difficulty"]))
-            logger.info(f"던전 목록 로드 완료: {len(self.dungeons)}개 던전 로드됨")
         except Exception as e:
             logger.error(f"던전 목록 로드 중 오류 발생: {str(e)}")
             logger.error(traceback.format_exc())
@@ -258,32 +245,21 @@ class PartyCog(commands.Cog):
         try:
             # 이미 초기화가 완료되었으면 건너뜀
             if self.initialization_completed:
-                logger.info("이미 초기화가 완료되었으므로 on_ready 이벤트 처리를 건너뜁니다.")
                 return
                 
             # 초기화 작업 시작 전에 플래그 설정 (중복 초기화 방지)
             self.initialization_completed = True
 
-            logger.info("봇 초기화 시작")
-            
             # 명령어 동기화 시도
             try:
-                logger.info("[DEBUG] 명령어 동기화 시도 중...")
                 # 명령어 트리 동기화
-                commands = await self.bot.tree.sync()
-                logger.info(f"[DEBUG] 명령어 트리 동기화 완료 - {len(commands)}개 명령어")
-                
-                # 사용 가능한 명령어 목록 출력
-                for cmd in commands:
-                    logger.info(f"[DEBUG] 등록된 명령어: /{cmd.name} - {cmd.description}")
+                await self.bot.tree.sync()
             except Exception as e:
-                logger.error(f"[DEBUG] 명령어 동기화 오류: {e}")
+                logger.error(f"명령어 동기화 오류: {e}")
                 logger.error(traceback.format_exc())
             
             # 봇이 준비된 상태이므로 서버 전체 목록 확인
-            logger.info(f"봇이 연결된 서버 수: {len(self.bot.guilds)}")
             for guild in self.bot.guilds:
-                logger.info(f"연결된 서버: {guild.name} (ID: {guild.id})")
                 # 허용 목록에 추가
                 self.allowed_guild_ids[str(guild.id)] = True
             
@@ -303,8 +279,6 @@ class PartyCog(commands.Cog):
     async def _restore_views(self):
         """저장된 뷰 상태를 복원합니다."""
         try:
-            logger.info("뷰 상태 복원 시작")
-            
             # 저장된 뷰 상태 가져오기
             states = await self.db["view_states"].find({}).to_list(length=None)
             
@@ -333,14 +307,12 @@ class PartyCog(commands.Cog):
                     # 채널 객체 가져오기
                     channel = self.bot.get_channel(int(channel_id))
                     if not channel:
-                        logger.warning(f"채널을 찾을 수 없음: {channel_id}")
                         continue
                     
                     # 메시지 객체 가져오기
                     try:
                         message = await channel.fetch_message(int(message_id))
                     except discord.NotFound:
-                        logger.warning(f"메시지를 찾을 수 없음: {message_id} (채널: {channel_id})")
                         # 메시지가 없으면 DB에서 삭제
                         await self.db["view_states"].delete_one({"message_id": message_id})
                         continue
@@ -379,14 +351,12 @@ class PartyCog(commands.Cog):
                     # 뷰 업데이트
                     try:
                         await message.edit(embed=embed, view=view)
-                        logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}의 상호작용을 다시 등록했습니다.")
                     except discord.NotFound:
-                        logger.warning(f"서버 {guild_id}의 모집 ID {recruitment_id}의 메시지({message_id})를 찾을 수 없어 업데이트를 건너뜁니다.")
                         # DB에서 해당 메시지 관련 정보 삭제
                         await self.db["view_states"].delete_one({"message_id": message_id})
                         continue
                     except Exception as e:
-                        logger.error(f"서버 {guild_id}의 모집 ID {recruitment_id}의 메시지 업데이트 중 오류: {e}")
+                        logger.error(f"메시지 업데이트 중 오류: {e}")
                         logger.error(traceback.format_exc())
                         continue
                     
@@ -394,15 +364,10 @@ class PartyCog(commands.Cog):
                     logger.error(f"뷰 상태 복원 중 키 오류 발생: {e}")
                     continue
                 except Exception as e:
-                    # state에서 필요한 정보 안전하게 추출
-                    safe_guild_id = state.get("guild_id", "unknown")
-                    safe_recruitment_id = state.get("recruitment_id", "unknown")
-                    
-                    logger.error(f"서버 {safe_guild_id}의 모집 ID {safe_recruitment_id} 뷰 상태 복원 중 오류 발생: {e}")
+                    logger.error(f"뷰 상태 복원 중 오류 발생: {e}")
                     logger.error(traceback.format_exc())
                     continue
             
-            logger.info("뷰 상태 복원 완료")
         except Exception as e:
             logger.error(f"뷰 상태 복원 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
@@ -411,31 +376,19 @@ class PartyCog(commands.Cog):
         """모집 등록 채널과 공고 채널을 초기화합니다."""
         # 이미 초기화가 완료되었고 강제 재시도가 아니면 건너뜀
         if self.initialization_completed and not force_retry:
-            logger.info("이미 초기화가 완료되었으므로 채널 초기화를 건너뜁니다.")
             return
             
         try:
-            logger.info("채널 초기화 시작")
-            
-            # 디버깅 정보 출력
-            logger.info(f"[DEBUG] 초기화할 등록 채널: {self.registration_channels}")
-            logger.info(f"[DEBUG] 초기화할 공고 채널: {self.announcement_channels}")
-            logger.info(f"[DEBUG] 채널 페어 관계: {self.channel_pairs}")
-            
             # 등록 채널 초기화
             for guild_id, channel_id in self.registration_channels.items():
-                logger.info(f"서버 {guild_id}의 모집 등록 채널 초기화 중: {channel_id}")
-                
                 # 길드 객체 가져오기
                 guild = self.bot.get_guild(int(guild_id))
                 if not guild:
-                    logger.warning(f"서버를 찾을 수 없음: {guild_id}")
                     continue
                 
                 # 채널 객체 가져오기
                 channel = guild.get_channel(int(channel_id))
                 if not channel:
-                    logger.warning(f"채널을 찾을 수 없음: {channel_id}")
                     continue
                 
                 try:
@@ -444,22 +397,16 @@ class PartyCog(commands.Cog):
                     
                     # 새 등록 양식 생성
                     await self.create_registration_form(channel)
-                    logger.info(f"서버 {guild_id}의 모집 등록 채널 초기화 완료")
                     
                     # 채널 페어링 관계 확인
                     if guild_id in self.channel_pairs:
-                        logger.info(f"[DEBUG] 서버 {guild_id}의 채널 페어 검사 중: {self.channel_pairs[guild_id]}")
-                        
                         # 추가 등록 채널 초기화
                         for reg_channel_id, _ in self.channel_pairs[guild_id].items():
                             # 현재 처리 중인 등록 채널이 아닌 다른 등록 채널만 처리
                             if reg_channel_id != channel_id:
-                                logger.info(f"[DEBUG] 페어링된 추가 등록 채널 초기화 중: {reg_channel_id}")
-                                
                                 # 채널 객체 가져오기
                                 reg_channel = guild.get_channel(int(reg_channel_id))
                                 if not reg_channel:
-                                    logger.warning(f"페어링된 등록 채널을 찾을 수 없음: {reg_channel_id}")
                                     continue
                                 
                                 try:
@@ -467,18 +414,12 @@ class PartyCog(commands.Cog):
                                     await self.clear_channel_messages(reg_channel, guild_id, is_paired=True, paired_id=reg_channel_id)
                                     
                                     # 새 등록 양식 생성
-                                    message = await self.create_registration_form(reg_channel)
-                                    if message:
-                                        logger.info(f"[DEBUG] 페어링된 등록 채널 {reg_channel_id}에 양식 생성 성공: {message.id}")
-                                    else:
-                                        logger.error(f"[DEBUG] 페어링된 등록 채널 {reg_channel_id}에 양식 생성 실패")
+                                    await self.create_registration_form(reg_channel)
                                     
                                 except Exception as e:
-                                    logger.error(f"서버 {guild_id}의 페어링된 추가 등록 채널 {reg_channel_id} 초기화 중 오류 발생: {e}")
+                                    logger.error(f"페어링된 등록 채널 초기화 중 오류 발생: {e}")
                                     logger.error(traceback.format_exc())
                                     continue
-                                    
-                                logger.info(f"서버 {guild_id}의 페어링된 추가 등록 채널 {reg_channel_id} 초기화 완료")
                     
                 except Exception as e:
                     logger.error(f"서버 {guild_id}의 등록 채널 {channel_id} 초기화 중 오류 발생: {e}")
@@ -490,19 +431,17 @@ class PartyCog(commands.Cog):
             
             # 공고 채널 초기화
             for guild_id, channel_id in self.announcement_channels.items():
-                logger.info(f"서버 {guild_id}의 공고 채널 초기화 중: {channel_id}")
-                
                 # 길드 객체 가져오기
                 guild = self.bot.get_guild(int(guild_id))
-                if not guild:
-                    logger.warning(f"서버를 찾을 수 없음: {guild_id}")
-                    continue
+                # if not guild:
+                #     logger.warning(f"서버를 찾을 수 없음: {guild_id}")
+                #     continue
                 
                 # 채널 객체 가져오기
                 announcement_channel = guild.get_channel(int(channel_id))
-                if not announcement_channel:
-                    logger.warning(f"채널을 찾을 수 없음: {channel_id}")
-                    continue
+                # if not announcement_channel:
+                #     logger.warning(f"채널을 찾을 수 없음: {channel_id}")
+                #     continue
                 
                 try:
                     # 활성 모집 정보 가져오기
@@ -510,29 +449,19 @@ class PartyCog(commands.Cog):
                         {"guild_id": guild_id, "status": "active"}
                     ).to_list(length=None)
                     
-                    logger.info(f"서버 {guild_id}의 활성 모집 {len(active_recruitments)}개를 불러왔습니다.")
-                    
                     # 모든 공고 채널 목록 생성
                     all_announcement_channels = set([channel_id])
                     if guild_id in self.channel_pairs:
                         for _, announcement_id in self.channel_pairs[guild_id].items():
                             all_announcement_channels.add(announcement_id)
                     
-                    logger.info(f"[DEBUG] 서버 {guild_id}의 모든 공고 채널 IDs: {all_announcement_channels}")
-                    
                     # 모든 페어링된 공고 채널도 초기화
                     for announcement_ch_id in all_announcement_channels:
                         if announcement_ch_id != channel_id:  # 기본 공고 채널은 이미 처리 중
-                            logger.info(f"[DEBUG] 페어링된 추가 공고 채널 초기화 중: {announcement_ch_id}")
-                            
                             # 채널 객체 가져오기
                             ann_channel = guild.get_channel(int(announcement_ch_id))
                             if not ann_channel:
-                                logger.warning(f"페어링된 공고 채널을 찾을 수 없음: {announcement_ch_id}")
                                 continue
-                            
-                            # 완료된 모집 메시지 삭제 시도
-                            logger.info(f"[DEBUG] 페어링된 공고 채널 {announcement_ch_id}의 완료된 모집 메시지 삭제 시도")
                             
                             # 해당 채널 메시지 히스토리 검사
                             if self.is_allowed_guild(guild_id):
@@ -540,11 +469,9 @@ class PartyCog(commands.Cog):
                                     # 활성 모집 정보와 메시지 히스토리 비교 및 대응
                                     await self.process_active_recruitments(guild, guild_id, active_recruitments, ann_channel)
                                 except Exception as e:
-                                    logger.error(f"서버 {guild_id}의 페어링된 공고 채널 {announcement_ch_id} 초기화 중 오류 발생: {e}")
+                                    logger.error(f"페어링된 공고 채널 초기화 중 오류 발생: {e}")
                                     logger.error(traceback.format_exc())
                                     continue
-                            
-                            logger.info(f"서버 {guild_id}의 페어링된 추가 공고 채널 {announcement_ch_id} 초기화 완료")
                     
                     # 기본 공고 채널에서 활성 모집 처리
                     if self.is_allowed_guild(guild_id):
@@ -569,10 +496,6 @@ class PartyCog(commands.Cog):
                     if force_retry:
                         # 오류 발생 시 재시도
                         await self._retry_initialization(delay_seconds=2)
-            
-            # 초기화 완료 플래그 설정
-            logger.info("채널 초기화 완료")
-            logger.info("채널 초기화 완료")
             
         except Exception as e:
             logger.error(f"채널 초기화 중 오류 발생: {e}")
@@ -600,8 +523,6 @@ class PartyCog(commands.Cog):
                 async for message in channel.history(limit=30):
                     if message.author.id == self.bot.user.id:
                         bot_messages.append(message)
-                
-                logger.info(f"서버 {guild_id}의 {channel_desc}에서 봇 메시지 {len(bot_messages)}개 발견")
             except Exception as e:
                 logger.error(f"서버 {guild_id}의 {channel_desc} 메시지 히스토리 조회 중 오류: {e}")
                 logger.error(traceback.format_exc())
@@ -609,7 +530,6 @@ class PartyCog(commands.Cog):
             
             # 메시지가 없으면 삭제 과정 건너뜀
             if not bot_messages:
-                logger.info(f"서버 {guild_id}의 {channel_desc}에 삭제할 메시지가 없습니다.")
                 return
                 
             # purge 메소드로 일괄 삭제 시도
@@ -618,43 +538,34 @@ class PartyCog(commands.Cog):
                 def is_bot_message(msg):
                     return msg.author.id == self.bot.user.id
                 
-                deleted = await channel.purge(limit=30, check=is_bot_message)
-                logger.info(f"서버 {guild_id}의 {channel_desc}에서 {len(deleted)}개 메시지 일괄 삭제 완료")
+                await channel.purge(limit=30, check=is_bot_message)
                 
             except discord.errors.Forbidden:
-                logger.error(f"서버 {guild_id}의 {channel_desc}에서 메시지 삭제 권한이 없습니다.")
+                logger.error(f"메시지 삭제 권한이 없습니다.")
                 return
                 
             except (discord.errors.NotFound, discord.errors.HTTPException) as e:
-                logger.warning(f"서버 {guild_id}의 {channel_desc}에서 일괄 삭제 중 오류 발생: {e}")
-                logger.info(f"개별 메시지 삭제 방식으로 전환합니다.")
-                
                 # 개별 삭제로 대체
-                deleted_count = 0
                 for message in bot_messages:
                     try:
                         await message.delete()
-                        deleted_count += 1
                         # API 속도 제한 방지
                         await asyncio.sleep(0.5)
                     except Exception as delete_error:
                         logger.error(f"메시지 개별 삭제 중 오류: {delete_error}")
                 
-                logger.info(f"서버 {guild_id}의 {channel_desc}에서 {deleted_count}개 메시지 개별 삭제 완료")
-                
             except Exception as e:
-                logger.error(f"서버 {guild_id}의 {channel_desc}에서 메시지 삭제 중 오류: {e}")
+                logger.error(f"메시지 삭제 중 오류: {e}")
                 logger.error(traceback.format_exc())
             
             # 삭제 후 잠시 대기
             await asyncio.sleep(1)
             
         except Exception as e:
-            logger.error(f"서버 {guild_id}의 {channel_desc} 메시지 삭제 과정 중 오류 발생: {e}")
+            logger.error(f"메시지 삭제 과정 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
 
     async def process_active_recruitments(self, guild, guild_id, active_recruitments, channel):
-        logger.info(f"[DEBUG] process_active_recruitments 시작 - 서버: {guild_id}, 채널: {channel.id}")
         try:
             updated_count = 0
             created_count = 0
@@ -662,7 +573,6 @@ class PartyCog(commands.Cog):
             duplicate_deleted_count = 0
 
             # 먼저 채널의 모든 메시지를 불러와서 모집 ID별로 정리
-            logger.info(f"[DEBUG] 채널 {channel.id}의 메시지를 불러와 모집 ID 매핑을 생성합니다")
             recruitment_messages = {}  # 모집 ID -> 메시지 목록
             try:
                 # 최대 100개의 메시지만 조회
@@ -682,37 +592,31 @@ class PartyCog(commands.Cog):
                             if recruitment_id not in recruitment_messages:
                                 recruitment_messages[recruitment_id] = []
                             recruitment_messages[recruitment_id].append(message)
-                            logger.info(f"[DEBUG] 채널 {channel.id}에서 모집 ID {recruitment_id}의 메시지 {message.id} 발견")
             except Exception as e:
-                logger.error(f"[DEBUG] 채널 메시지 조회 중 오류: {e}")
+                logger.error(f"채널 메시지 조회 중 오류: {e}")
                 logger.error(traceback.format_exc())
             
             # 각 모집 ID별로 중복 메시지 처리
             for recruitment_id, messages in recruitment_messages.items():
                 if len(messages) > 1:
-                    logger.info(f"[DEBUG] 모집 ID {recruitment_id}의 중복 메시지 {len(messages)}개 발견")
                     # 모든 중복 메시지 삭제 (새로 생성할 예정이므로)
                     for message in messages:
                         try:
                             await message.delete()
                             duplicate_deleted_count += 1
-                            logger.info(f"[DEBUG] 중복 모집 ID {recruitment_id}의 메시지 {message.id} 삭제")
                         except Exception as e:
-                            logger.error(f"[DEBUG] 중복 메시지 삭제 중 오류: {e}")
+                            logger.error(f"중복 메시지 삭제 중 오류: {e}")
                     # 해당 ID의 모든 메시지를 삭제했으므로 목록 비우기
                     recruitment_messages[recruitment_id] = []
 
             # 이제 각 활성 모집 처리
             for recruitment in active_recruitments:
                 recruitment_id = str(recruitment.get('_id'))
-                logger.info(f"[DEBUG] 모집 처리 시작 - ID: {recruitment_id}")
-                logger.info(f"[DEBUG] 모집 데이터: {recruitment}")
                 
                 # 모집 데이터 검증
                 required_fields = ['type', 'dungeon', 'difficulty', 'max_participants', 'description']
                 missing_fields = [field for field in required_fields if not recruitment.get(field)]
                 if missing_fields:
-                    logger.warning(f"[DEBUG] 모집 {recruitment_id}에 누락된 필드: {missing_fields}")
                     continue
                 
                 # 각 모집이 해당 채널에 속하는지 확인
@@ -727,17 +631,14 @@ class PartyCog(commands.Cog):
                 # 이 모집의 등록 채널이 현재 채널과 페어링되어 있는지 확인
                 pairs = self.channel_pairs.get(guild_id, {})
                 if registration_channel_id in pairs and pairs[registration_channel_id] == channel_id_str:
-                    logger.info(f"모집 {recruitment_id}는 이 채널({channel_id_str})과 페어링된 등록 채널({registration_channel_id})에서 왔으므로 표시")
                     is_paired_channel = True
                 
                 # 공고 채널이 현재 채널인 경우
                 if announcement_channel_id == channel_id_str:
-                    logger.info(f"모집 {recruitment_id}는 이 채널({channel_id_str})을 공고 채널로 지정했으므로 표시")
                     is_paired_channel = True
                 
                 # 해당 모집이 이 채널에 표시되어야 하는 경우만 처리
                 if not is_paired_channel:
-                    logger.info(f"모집 {recruitment_id}는 이 채널({channel_id_str})과 관련이 없어 건너뜁니다")
                     continue
                 
                 # 1. 이미 게시된 공고 메시지가 있는지 확인
@@ -748,7 +649,6 @@ class PartyCog(commands.Cog):
                 if existing_message:
                     # 기존 메시지가 있으면 업데이트가 필요한지 확인
                     needs_update = await self.check_announcement_needs_update(existing_message, recruitment)
-                    logger.info(f"[DEBUG] 모집 {recruitment_id} 업데이트 필요 여부: {needs_update}")
                 
                 # 2. 모집 View 생성 및 값 설정
                 view = RecruitmentCard(self.dungeons, self.db)
@@ -781,7 +681,6 @@ class PartyCog(commands.Cog):
                 # 3. 상황에 따라 메시지 생성 또는 업데이트
                 if existing_message and not needs_update:
                     # 기존 메시지가 있고 업데이트가 필요 없는 경우, 상호작용(버튼/선택메뉴)만 업데이트
-                    logger.info(f"[DEBUG] 모집 {recruitment_id}의 상호작용만 업데이트합니다")
                     try:
                         # 메시지 객체를 view에 연결
                         view.message = existing_message
@@ -789,37 +688,30 @@ class PartyCog(commands.Cog):
                         # 기존 임베드는 그대로 유지하고 상호작용(view)만 업데이트
                         await existing_message.edit(view=view)
                         updated_count += 1
-                        logger.info(f"[DEBUG] 모집 {recruitment_id}의 상호작용 업데이트 완료")
                     except Exception as e:
-                        logger.error(f"[DEBUG] 모집 {recruitment_id}의 상호작용 업데이트 중 오류: {e}")
+                        logger.error(f"상호작용 업데이트 중 오류: {e}")
                         logger.error(traceback.format_exc())
                 else:
                     # 기존 메시지가 없거나 업데이트가 필요한 경우
                     if existing_message:
-                        logger.info(f"[DEBUG] 모집 {recruitment_id}의 내용이 변경되어 완전히 업데이트합니다")
                         try:
                             # 기존 메시지 삭제
                             await existing_message.delete()
                             deleted_count += 1
-                            logger.info(f"[DEBUG] 기존 메시지 {existing_message.id} 삭제 완료")
                         except Exception as e:
-                            logger.error(f"[DEBUG] 기존 메시지 삭제 중 오류: {e}")
-                    else:
-                        logger.info(f"[DEBUG] 모집 {recruitment_id}의 새 공고 메시지를 생성합니다")
+                            logger.error(f"기존 메시지 삭제 중 오류: {e}")
                     
                     # 새 메시지 생성
                     try:
                         result = await self.post_recruitment_announcement(guild_id, recruitment, view)
                         if result:
                             created_count += 1
-                            logger.info(f"[DEBUG] 모집 {recruitment_id}의 새 공고 생성 완료 (메시지 ID: {result.id})")
                         else:
-                            logger.error(f"[DEBUG] 모집 {recruitment_id}의 새 공고 생성 실패")
+                            logger.error(f"새 공고 생성 실패")
                     except Exception as e:
-                        logger.error(f"[DEBUG] 모집 {recruitment_id}의 새 공고 생성 중 오류: {e}")
+                        logger.error(f"새 공고 생성 중 오류: {e}")
                         logger.error(traceback.format_exc())
             
-            logger.info(f"[DEBUG] 활성 모집 처리 완료 - 생성: {created_count}개, 상호작용 업데이트: {updated_count}개, 삭제: {deleted_count}개, 중복 삭제: {duplicate_deleted_count}개")
             return True
         except Exception as e:
             logger.error(f"process_active_recruitments 오류: {e}")
@@ -829,9 +721,6 @@ class PartyCog(commands.Cog):
     async def create_recruitment_announcement(self, guild_id, recruitment_data):
         """모집 정보를 바탕으로 공고를 새로 생성합니다."""
         try:
-            logger.info(f"모집 ID {recruitment_data.get('_id')}에 대한 공고 생성 시작")
-            logger.info(f"모집 데이터:::::: {recruitment_data}")
-            
             # 모집 데이터로 뷰 생성
             view = RecruitmentCard(self.dungeons, self.db)
             view.recruitment_id = str(recruitment_data.get("_id"))
@@ -933,8 +822,6 @@ class PartyCog(commands.Cog):
             # 모집 정보 조회 (최신순)
             recruitments = await self.db["recruitments"].find(query).sort("created_at", -1).to_list(length=None)
             
-            logger.info(f"서버 {guild_id}에서 상태가 {status}인 모집 {len(recruitments)}개를 조회했습니다.")
-            
             return recruitments
             
         except Exception as e:
@@ -947,11 +834,6 @@ class PartyCog(commands.Cog):
         try:
             # 모집 ID로 모집 정보 조회
             recruitment = await self.db["recruitments"].find_one({"_id": ObjectId(recruitment_id)})
-            
-            if recruitment:
-                logger.info(f"모집 ID {recruitment_id}에 대한 정보를 조회했습니다.")
-            else:
-                logger.warning(f"모집 ID {recruitment_id}에 대한 정보를 찾을 수 없습니다.")
             
             return recruitment
             
@@ -1042,7 +924,7 @@ class PartyCog(commands.Cog):
         
         # 허용되지 않은 길드는 무시
         if not self.is_allowed_guild(guild_id):
-            logger.debug(f"허용되지 않은 길드에서 메시지 수신: ID={guild_id}, 이름={guild_name}, 채널={message.channel.name}, 사용자={message.author.name}")
+            logger.info(f"허용되지 않은 길드에서 메시지 수신: ID={guild_id}, 이름={guild_name}, 채널={message.channel.name}, 사용자={message.author.name}")
             return
             
         # 공고 채널인지 확인
@@ -1064,8 +946,6 @@ class PartyCog(commands.Cog):
     async def create_registration_form(self, channel):
         """모집 등록 양식을 생성합니다."""
         try:
-            logger.info(f"채널 {channel.id}에 모집 등록 양식 생성 시도")
-            
             # 기존 등록 양식 확인 및 삭제
             try:
                 # 봇이 보낸 메시지 중 모집 등록 양식인지 확인하여 삭제
@@ -1078,11 +958,9 @@ class PartyCog(commands.Cog):
                 
                 # 중복 양식이 있으면 모두 삭제
                 if len(existing_forms) > 0:
-                    logger.info(f"채널 {channel.id}에서 기존 등록 양식 {len(existing_forms)}개 발견, 삭제 시도")
                     for form in existing_forms:
                         try:
                             await form.delete()
-                            logger.info(f"채널 {channel.id}의 기존 등록 양식 삭제 완료: {form.id}")
                         except Exception as delete_error:
                             logger.error(f"기존 등록 양식 삭제 중 오류: {delete_error}")
                     
@@ -1110,7 +988,6 @@ class PartyCog(commands.Cog):
             try:
                 message = await channel.send(embed=embed, view=view)
                 view.message = message
-                logger.info(f"채널 {channel.id}에 모집 등록 양식 생성 완료: {message.id}")
                 return message
             except Exception as e:
                 logger.error(f"모집 등록 양식 메시지 전송 중 오류: {e}")
@@ -1128,8 +1005,6 @@ class PartyCog(commands.Cog):
             if not self.is_allowed_guild(guild_id):
                 return None
             
-            logger.info(f"서버 {guild_id}의 모집 ID {view.recruitment_id}에 대한 공고 게시 시작")
-            
             # 길드 객체 가져오기
             guild = self.bot.get_guild(int(guild_id))
             if not guild:
@@ -1139,60 +1014,49 @@ class PartyCog(commands.Cog):
             # 모집 정보에서 등록 채널 ID 확인
             registration_channel_id = str(recruitment_data.get("registration_channel_id", "0"))
             if registration_channel_id == "0" or not registration_channel_id:
-                logger.warning(f"모집 {view.recruitment_id}의 등록 채널 ID가 없습니다. 기본 공고 채널을 사용합니다.")
-                
                 # 공고 채널 ID 가져오기
                 announcement_channel_id = self.announcement_channels.get(guild_id)
                 if not announcement_channel_id:
-                    logger.error(f"서버 {guild_id}의 공고 채널을 찾을 수 없음")
+                    logger.error(f"공고 채널을 찾을 수 없음: {guild_id}")
                     return None
                 
                 # 채널 객체 가져오기
                 announcement_channel = guild.get_channel(int(announcement_channel_id))
                 if not announcement_channel:
-                    logger.error(f"서버 {guild_id}의 공고 채널 객체를 가져올 수 없음: {announcement_channel_id}")
+                    logger.error(f"공고 채널 객체를 가져올 수 없음: {announcement_channel_id}")
                     return None
-                    
-                logger.info(f"서버 {guild_id}의 기본 공고 채널에 모집 공고를 게시합니다: {announcement_channel_id}")
             else:
                 # 페어링된 채널 확인
-                logger.info(f"모집 {view.recruitment_id}의 등록 채널 ID: {registration_channel_id}")
                 
                 # 해당 등록 채널에 대응하는 공고 채널 확인
                 if guild_id in self.channel_pairs and registration_channel_id in self.channel_pairs[guild_id]:
                     # 채널 페어링이 존재하는 경우, 해당 공고 채널 사용
                     announcement_channel_id = self.channel_pairs[guild_id][registration_channel_id]
-                    logger.info(f"서버 {guild_id}의 페어링된 공고 채널을 사용합니다: {announcement_channel_id}")
                     
                     # 채널 객체 가져오기
                     announcement_channel = guild.get_channel(int(announcement_channel_id))
                     if not announcement_channel:
-                        logger.error(f"서버 {guild_id}의 페어링된 공고 채널 객체를 가져올 수 없음: {announcement_channel_id}")
-                        
                         # 대체로 기본 공고 채널 사용
                         fallback_channel_id = self.announcement_channels.get(guild_id)
                         if not fallback_channel_id:
-                            logger.error(f"서버 {guild_id}의 대체 공고 채널도 찾을 수 없음")
+                            logger.error(f"대체 공고 채널도 찾을 수 없음: {guild_id}")
                             return None
                             
                         announcement_channel = guild.get_channel(int(fallback_channel_id))
                         if not announcement_channel:
-                            logger.error(f"서버 {guild_id}의 대체 공고 채널 객체도 가져올 수 없음: {fallback_channel_id}")
+                            logger.error(f"대체 공고 채널 객체도 가져올 수 없음: {fallback_channel_id}")
                             return None
-                            
-                        logger.warning(f"서버 {guild_id}의 페어링된 공고 채널을 찾을 수 없어 기본 채널로 대체: {fallback_channel_id}")
                 else:
                     # 채널 페어링이 없는 경우, 기본 공고 채널 사용
-                    logger.info(f"서버 {guild_id}의 등록 채널 {registration_channel_id}에 대한 페어링이 없어 기본 공고 채널을 사용합니다.")
                     announcement_channel_id = self.announcement_channels.get(guild_id)
                     if not announcement_channel_id:
-                        logger.error(f"서버 {guild_id}의 공고 채널을 찾을 수 없음")
+                        logger.error(f"공고 채널을 찾을 수 없음: {guild_id}")
                         return None
                     
                     # 채널 객체 가져오기
                     announcement_channel = guild.get_channel(int(announcement_channel_id))
                     if not announcement_channel:
-                        logger.error(f"서버 {guild_id}의 공고 채널 객체를 가져올 수 없음: {announcement_channel_id}")
+                        logger.error(f"공고 채널 객체를 가져올 수 없음: {announcement_channel_id}")
                         return None
             
             # 공고용 임베드 생성
@@ -1253,7 +1117,6 @@ class PartyCog(commands.Cog):
                     row=1
                 )
                 announcement_view.add_item(delete_button)
-                logger.debug(f"모집 취소 버튼이 첫 번째 참가자 ID {first_participant_id}에게 표시됩니다.")
             
             # 공고 전송
             try:
@@ -1271,7 +1134,6 @@ class PartyCog(commands.Cog):
                     }}
                 )
                 
-                logger.info(f"서버 {guild_id}의 모집 ID {view.recruitment_id}에 대한 공고가 채널 {announcement_channel.id}에 성공적으로 게시되었습니다.")
                 return announcement_message
                 
             except Exception as e:
@@ -1353,23 +1215,21 @@ class PartyCog(commands.Cog):
         # 작업 취소
         self.initialize_and_cleanup.cancel()
         self.refresh_registration_forms.cancel()  # 새로 추가된 양식 갱신 작업 취소
+        self.cleanup_threads_and_voice_channels.cancel()  # 스레드 및 음성채널 정리 작업 취소
         logger.info("Party cog unloaded")
 
     @tasks.loop(minutes=10)  # 10분마다 실행
     async def initialize_and_cleanup(self):
-        logger.info("[DEBUG] 채널 초기화 및 정리 시작")
         try:
             # 모든 서버에 대해 채널 초기화 및 정리 수행
             for guild in self.bot.guilds:
                 try:
-                    logger.info(f"[DEBUG] 서버 {guild.id} 처리 시작")
                     # 채널 초기화
                     await self.initialize_channels(force_retry=True)
                     
                     # 활성 모집 처리
                     active_recruitments = await self.get_recruitments_by_guild(str(guild.id), status="active")
                     if active_recruitments:
-                        logger.info(f"[DEBUG] 서버 {guild.id}의 활성 모집 {len(active_recruitments)}개 발견")
                         for channel_id in self.announcement_channels.get(str(guild.id), []):
                             channel = guild.get_channel(int(channel_id))
                             if channel:
@@ -1380,41 +1240,35 @@ class PartyCog(commands.Cog):
                         await self.force_cleanup_channel(str(guild.id), channel_id)
                         
                 except Exception as e:
-                    logger.error(f"[DEBUG] 서버 {guild.id} 처리 중 오류: {e}")
+                    logger.error(f"서버 처리 중 오류: {e}")
                     continue
                     
         except Exception as e:
-            logger.error(f"[DEBUG] initialize_and_cleanup 전체 오류: {e}")
+            logger.error(f"initialize_and_cleanup 전체 오류: {e}")
             logger.error(traceback.format_exc())
 
     @initialize_and_cleanup.before_loop
     async def before_initialize_and_cleanup(self):
         """initialize_and_cleanup 작업 시작 전 실행되는 메서드"""
-        logger.debug("봇 상태 체크 작업 준비 중...")
         await self.bot.wait_until_ready()  # 봇이 준비될 때까지 대기
-        logger.debug("봇 상태 체크 작업 시작")
 
     async def force_cleanup_channel(self, guild_id, channel_id):
-        """특정 채널의 완료된 모집 메시지를 강제로 삭제합니다."""
+        """특정 채널의 완료된 모집 메시지를 강제로 삭제합니다.""" 
         # 허용된 길드인지 확인
         guild = self.bot.get_guild(int(guild_id))
-        guild_name = guild.name if guild else "알 수 없음"
         
         if not self.is_allowed_guild(guild_id):
-            logger.debug(f"허용되지 않은 길드의 채널 정리 요청 무시: ID={guild_id}, 이름={guild_name}")
             return
             
         try:
             # 서버 객체 가져오기
             guild = self.bot.get_guild(int(guild_id))
             if not guild:
-                logger.warning(f"서버를 찾을 수 없음: {guild_id}")
                 return
             
             # 채널 객체 가져오기
             channel = guild.get_channel(int(channel_id))
             if not channel:
-                logger.warning(f"서버 {guild_id}의 공고 채널을 찾을 수 없음: {channel_id}")
                 return
             
             # 서버별 모집 정보 조회
@@ -1437,8 +1291,6 @@ class PartyCog(commands.Cog):
                     recruitment_message_map[recruitment_id] = message_id
                     message_recruitment_map[message_id] = recruitment_id
             
-            logger.debug(f"서버 {guild_id}에서 {len(recruitments)}개의 모집을 찾았습니다.")
-            
             # 활성 모집 ID 목록 생성
             active_recruitment_ids = set()
             completed_recruitment_ids = set()
@@ -1451,8 +1303,6 @@ class PartyCog(commands.Cog):
                     completed_recruitment_ids.add(recruitment_id)
                 elif status == 'cancelled':
                     cancelled_recruitment_ids.add(recruitment_id)
-            
-            logger.debug(f"서버 {guild_id} - 활성 모집: {len(active_recruitment_ids)}개, 완료된 모집: {len(completed_recruitment_ids)}개, 취소된 모집: {len(cancelled_recruitment_ids)}개")
             
             # 채널에 있는 메시지 ID를 모집 ID와 매핑
             channel_message_recruitment_map = {}
@@ -1498,7 +1348,6 @@ class PartyCog(commands.Cog):
                                         "updated_at": datetime.now().isoformat()
                                     }}
                                 )
-                                logger.info(f"서버 {guild_id}에서 발견된 활성 모집 {recruitment_id}의 메시지 ID를 업데이트했습니다: {message.id}")
         
                 except Exception as e:
                     logger.error(f"메시지 처리 중 오류 발생: {e}")
@@ -1527,7 +1376,6 @@ class PartyCog(commands.Cog):
             # 모집 ID별로 2개 이상의 메시지가 있으면 가장 최근 것을 제외하고 삭제
             for recruitment_id, message_ids in duplicate_messages.items():
                 if len(message_ids) > 1:
-                    logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}에 대한 중복 메시지 발견: {len(message_ids)}개")
                     # 메시지 ID를 정수로 변환하여 정렬 (최신 메시지가 큰 ID 값을 가짐)
                     sorted_message_ids = sorted([int(mid) for mid in message_ids], reverse=True)
                     # 가장 최신 메시지를 제외한 나머지 삭제
@@ -1535,7 +1383,6 @@ class PartyCog(commands.Cog):
                         try:
                             message = await channel.fetch_message(message_id)
                             await message.delete()
-                            logger.info(f"서버 {guild_id}의 중복 메시지 삭제: {message_id}")
                         except Exception as e:
                             logger.error(f"중복 메시지 삭제 중 오류: {e}")
             
@@ -1569,12 +1416,9 @@ class PartyCog(commands.Cog):
                         
                         # 완료되거나 취소된 모집의 메시지만 삭제
                         if status in ["complete", "cancelled"]:
-                            logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}의 상태가 {status}이므로 메시지를 삭제합니다.")
                             await message.delete()
                             deleted_count += 1
                         elif status == "active":
-                            logger.debug(f"서버 {guild_id}의 모집 ID {recruitment_id}는 아직 활성 상태입니다.")
-                            
                             # 활성 모집의 경우 상호작용을 갱신
                             try:
                                 # 모집 데이터 가져오기
@@ -1632,25 +1476,19 @@ class PartyCog(commands.Cog):
                                     await message.edit(embed=embed, view=view)
                                     view.message = message
                                     updated_count += 1
-                                    logger.debug(f"서버 {guild_id}의 모집 ID {recruitment_id}의 메시지를 갱신했습니다.")
                             except Exception as e:
                                 logger.error(f"활성 모집 메시지 갱신 중 오류 발생: {e}")
                                 logger.error(traceback.format_exc())
                         elif recruitment_id not in recruitment_status_map:
                             # 데이터베이스에 없는 모집의 메시지는 삭제
-                            logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}가 데이터베이스에 존재하지 않아 메시지를 삭제합니다.")
                             await message.delete()
                             deleted_count += 1
-                        else:
-                            logger.debug(f"서버 {guild_id}의 모집 ID {recruitment_id}의 상태가 {status}로 처리되지 않았습니다.")
         
                 except Exception as e:
                     logger.error(f"메시지 처리 중 오류 발생: {e}")
                     logger.error(traceback.format_exc())
                     continue
             
-            logger.debug(f"서버 {guild_id}의 채널 정리 완료: {deleted_count}개의 메시지가 삭제되었고, {updated_count}개의 메시지가 갱신되었습니다.")
-        
         except Exception as e:
             logger.error(f"강제 채널 정리 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
@@ -1660,20 +1498,18 @@ class PartyCog(commands.Cog):
     async def set_announcement_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
         """모집 공고 채널을 설정하는 명령어"""
         try:
-            logger.info(f"[DEBUG] 모집채널설정 명령어 시작 - 사용자: {interaction.user.id}, 서버: {interaction.guild.id}, 채널: {channel.id}")
             await interaction.response.defer(ephemeral=True)
             
             # 내부 메서드 호출
             result = await self.set_announcement_channel_internal(interaction, channel)
-            logger.info(f"[DEBUG] 모집채널설정 명령어 완료 - 결과: {result}")
             
         except Exception as e:
-            logger.error(f"[DEBUG] 모집채널설정 명령어 오류: {e}")
+            logger.error(f"모집채널설정 명령어 오류: {e}")
             logger.error(traceback.format_exc())
             try:
                 await interaction.followup.send("모집 공고 채널 설정 중 오류가 발생했습니다.", ephemeral=True)
             except:
-                logger.error("[DEBUG] 모집채널설정 에러 메시지 전송 실패")
+                pass
 
     async def set_announcement_channel_internal(self, interaction: discord.Interaction, channel: discord.TextChannel):
         """내부적으로 모집 공고 채널을 설정합니다."""
@@ -1694,9 +1530,6 @@ class PartyCog(commands.Cog):
             # 메모리에도 설정 저장
             self.announcement_channels[guild_id] = str(channel.id)
             
-            # 디버그 로그 추가
-            logger.info(f"서버 {guild_id}의 모집 공고 채널이 {channel.id}로 설정되었습니다. DB 결과: {update_result.acknowledged}")
-            
             # 응답 메시지
             await interaction.followup.send(f"모집 공고 채널이 {channel.mention}으로 설정되었습니다.", ephemeral=True)
             
@@ -1710,19 +1543,10 @@ class PartyCog(commands.Cog):
     async def set_registration_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
         """모집 등록 양식을 게시할 채널을 설정하는 명령어"""
         try:
-            logger.info(f"[DEBUG] 모집등록채널설정 명령어 시작 - 사용자: {interaction.user.id}, 서버: {interaction.guild.id}, 채널: {channel.id}")
-            # 응답 지연 (더 긴 작업을 위해)
             await interaction.response.defer(ephemeral=True)
             
             guild_id = str(interaction.guild.id)
             channel_id = str(channel.id)
-            
-            # 디버그 정보 추가
-            try:
-                permission_check = channel.permissions_for(interaction.guild.me)
-                logger.info(f"[DEBUG] 채널 권한 확인: 메시지 보내기={permission_check.send_messages}, 메시지 관리={permission_check.manage_messages}")
-            except Exception as e:
-                logger.error(f"[DEBUG] 권한 체크 중 오류: {e}")
             
             # DB에 저장
             try:
@@ -1731,9 +1555,8 @@ class PartyCog(commands.Cog):
                     {"$set": {"registration_channel_id": channel_id}},
                     upsert=True
                 )
-                logger.info(f"[DEBUG] DB 업데이트 성공 - guild_id: {guild_id}, channel_id: {channel_id}")
             except Exception as e:
-                logger.error(f"[DEBUG] DB 업데이트 오류: {e}")
+                logger.error(f"DB 업데이트 오류: {e}")
                 raise
             
             # 캐시 업데이트
@@ -1750,34 +1573,30 @@ class PartyCog(commands.Cog):
                     if message.author.id == self.bot.user.id:
                         await message.delete()
                         delete_count += 1
-                logger.info(f"[DEBUG] 채널 메시지 삭제 성공 - {delete_count}개 삭제됨")
             except Exception as e:
-                logger.error(f"[DEBUG] 채널 메시지 삭제 오류: {e}")
+                logger.error(f"채널 메시지 삭제 오류: {e}")
                 logger.error(traceback.format_exc())
             
             # 새 등록 양식 생성
             try:
                 form = await self.create_registration_form(channel)
-                if form:
-                    logger.info(f"[DEBUG] 등록 양식 생성 성공 - 메시지 ID: {form.id}")
-                else:
-                    logger.error("[DEBUG] 등록 양식 생성 실패 - 반환값 없음")
+                if not form:
+                    logger.error("등록 양식 생성 실패 - 반환값 없음")
             except Exception as e:
-                logger.error(f"[DEBUG] 등록 양식 생성 중 오류: {e}")
+                logger.error(f"등록 양식 생성 중 오류: {e}")
                 logger.error(traceback.format_exc())
                 raise
             
             # 응답 전송
             await interaction.followup.send(f"모집 등록 양식이 {channel.mention}에 생성되었습니다.", ephemeral=True)
-            logger.info(f"[DEBUG] 모집등록채널설정 명령어 완료 - 서버: {guild_id}")
             
         except Exception as e:
-            logger.error(f"[DEBUG] 모집등록채널설정 명령어 전체 오류: {e}")
+            logger.error(f"모집등록채널설정 명령어 전체 오류: {e}")
             logger.error(traceback.format_exc())
             try:
                 await interaction.followup.send("모집 등록 채널 설정 중 오류가 발생했습니다.", ephemeral=True)
             except:
-                logger.error("[DEBUG] 모집등록채널설정 에러 메시지 전송 실패")
+                pass
     
     @app_commands.command(name="모집초기화", description="모집 등록 채널을 초기화합니다.")
     @app_commands.checks.has_permissions(administrator=True)
@@ -2036,64 +1855,50 @@ class PartyCog(commands.Cog):
         guild = self.bot.get_guild(int(guild_id_str))
         if guild:
             guild_name = guild.name
-            logger.info(f"[DEBUG] 길드 정보 - 이름: {guild_name}, ID: {guild_id_str}")
         else:
-            logger.info(f"[DEBUG] 길드 객체를 찾을 수 없음 - ID: {guild_id_str}")
+            pass
         
         # 없는 경우 allowed_guild_ids에 추가
         if guild_id_str not in self.allowed_guild_ids:
-            logger.info(f"[DEBUG] 새로운 길드 허용 추가 - ID: {guild_id_str}")
             self.allowed_guild_ids[guild_id_str] = True
-        
-        logger.info(f"허용된 길드 접근: ID={guild_id_str}, 이름={guild_name}")
         
         return is_allowed
 
     # 각 명령어에 대한 길드 ID 검사 추가
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        """앱 명령어 상호작용 전 권한을 확인합니다."""
+        """앱 명령어 상호작용 전 권한을 확인합니다.""" 
         # 상호작용이 서버에서 실행되었는지 확인
         if not interaction.guild_id:
             try:
-                logger.info(f"[DEBUG] 서버 외부 명령어 시도 - 사용자: {interaction.user.id}, 명령어: {interaction.command.name if interaction.command else '알 수 없음'}")
                 await interaction.response.send_message("이 명령어는 서버에서만 사용할 수 있습니다.", ephemeral=True)
             except Exception as e:
-                logger.error(f"[DEBUG] 서버 외부 응답 오류: {e}")
+                logger.error(f"서버 외부 응답 오류: {e}")
                 # 이미 응답이 시작된 경우
                 try:
                     await interaction.followup.send("이 명령어는 서버에서만 사용할 수 있습니다.", ephemeral=True)
                 except Exception as e:
-                    logger.error(f"[DEBUG] 서버 외부 followup 응답 오류: {e}")
+                    logger.error(f"서버 외부 followup 응답 오류: {e}")
             
-            logger.warning(f"서버 외부에서 명령어 사용 시도: 사용자={interaction.user.name}, 명령어={interaction.command.name if interaction.command else '알 수 없음'}")
             return False
         
         # 허용된 길드인지 확인
         guild_id = str(interaction.guild_id)
-        guild_name = interaction.guild.name if interaction.guild else "알 수 없음"
         
-        # 허용 여부 디버그 로그 추가
-        logger.info(f"[DEBUG] 길드 권한 체크 - 길드 ID: {guild_id}, 길드 이름: {guild_name}")
-        logger.info(f"[DEBUG] 허용된 길드 목록: {self.allowed_guild_ids}")
         is_allowed = self.is_allowed_guild(guild_id)
-        logger.info(f"[DEBUG] 길드 허용 여부: {is_allowed}")
         
         if not is_allowed:
             try:
-                logger.info(f"[DEBUG] 허용되지 않은 길드 응답 시도 - 사용자: {interaction.user.id}")
                 await interaction.response.send_message("이 봇은 동글봇 개발팀과 연동된 서버만 사용 가능합니다.", ephemeral=True)
             except Exception as e:
-                logger.error(f"[DEBUG] 허용되지 않은 길드 응답 오류: {e}")
+                logger.error(f"허용되지 않은 길드 응답 오류: {e}")
                 # 이미 응답이 시작된 경우
                 try:
                     await interaction.followup.send("이 봇은 동글봇 개발팀과 연동된 서버만 사용 가능합니다.", ephemeral=True)
                 except Exception as e:
-                    logger.error(f"[DEBUG] 허용되지 않은 길드 followup 응답 오류: {e}")
+                    logger.error(f"허용되지 않은 길드 followup 응답 오류: {e}")
                 
-            logger.warning(f"허용되지 않은 길드에서 명령어 사용 시도: ID={guild_id}, 이름={guild_name}, 사용자={interaction.user.name}, 명령어={interaction.command.name if interaction.command else '알 수 없음'}")
             return False
         
-        logger.info(f"명령어 사용: 길드={guild_name}({guild_id}), 사용자={interaction.user.name}, 명령어={interaction.command.name if interaction.command else '알 수 없음'}")
         return True
 
     # 명령어 실행 전 권한 확인 메서드 추가
@@ -2122,7 +1927,6 @@ class PartyCog(commands.Cog):
             )
             
             await interaction.response.send_message(f"비밀 쓰레드 생성 채널이 {channel.mention}으로 설정되었습니다.", ephemeral=True)
-            logger.info(f"서버 {guild_id}의 쓰레드 채널 설정: {channel_id}")
         except Exception as e:
             logger.error(f"쓰레드 채널 설정 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
@@ -2141,9 +1945,7 @@ class PartyCog(commands.Cog):
     async def refresh_registration_forms(self):
         """모집 등록 양식을 주기적으로 갱신합니다."""
         try:
-            logger.info("모집 등록 양식 갱신 작업 시작...")
             if not self.registration_channels:
-                logger.info("등록된 모집 등록 채널이 없습니다.")
                 return
             
             # 각 서버별로 등록 양식 갱신
@@ -2152,24 +1954,19 @@ class PartyCog(commands.Cog):
                     # 서버 객체 가져오기
                     guild = self.bot.get_guild(int(guild_id))
                     if not guild:
-                        logger.warning(f"모집 양식 갱신 - 서버를 찾을 수 없음: {guild_id}")
                         continue
                     
                     # 채널 객체 가져오기
                     channel = guild.get_channel(int(channel_id))
                     if not channel:
-                        logger.warning(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널을 찾을 수 없음: {channel_id}")
                         continue
                     
                     # 채널 메시지 일괄 삭제 시도 (2주 이내 메시지만 가능)
                     try:
                         # 일괄 삭제 시도
                         deleted = await channel.purge(limit=50, check=lambda m: m.author.id == self.bot.user.id)
-                        deleted_count = len(deleted)
-                        logger.info(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에서 {deleted_count}개 메시지 일괄 삭제 성공")
                     except Exception as bulk_error:
                         # 일괄 삭제 실패 시 개별 삭제 시도
-                        logger.warning(f"모집 양식 갱신 - 일괄 삭제 실패, 개별 삭제 시도: {bulk_error}")
                         deleted_count = 0
                         try:
                             async for message in channel.history(limit=30):
@@ -2180,7 +1977,6 @@ class PartyCog(commands.Cog):
                                         await asyncio.sleep(0.5)  # API 속도 제한 방지
                                     except Exception as e:
                                         logger.error(f"모집 양식 갱신 - 메시지 삭제 중 오류: {e}")
-                            logger.info(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에서 {deleted_count}개 메시지 개별 삭제")
                         except Exception as e:
                             logger.error(f"모집 양식 갱신 - 채널 히스토리 조회 중 오류: {e}")
                     
@@ -2190,21 +1986,15 @@ class PartyCog(commands.Cog):
                     # 새 등록 양식 생성
                     try:
                         new_form = await self.create_registration_form(channel)
-                        if new_form:
-                            logger.info(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에 새 양식 생성 성공 (메시지 ID: {new_form.id})")
-                        else:
+                        if not new_form:
                             logger.error(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에 새 양식 생성 실패 (반환값 없음)")
                     except Exception as form_error:
                         logger.error(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에 새 양식 생성 중 오류: {form_error}")
                         logger.error(traceback.format_exc())
                     
-                    logger.info(f"서버 {guild_id}의 모집 등록 양식 자동 갱신 완료")
-                    
                 except Exception as e:
                     logger.error(f"모집 양식 갱신 - 서버 {guild_id}의 양식 갱신 중 오류: {e}")
                     logger.error(traceback.format_exc())
-            
-            logger.info("모집 등록 양식 갱신 작업 완료")
             
         except Exception as e:
             logger.error(f"모집 양식 갱신 작업 중 오류 발생: {e}")
@@ -2213,9 +2003,7 @@ class PartyCog(commands.Cog):
     @refresh_registration_forms.before_loop
     async def before_refresh_registration_forms(self):
         """양식 갱신 작업 시작 전 실행되는 메서드"""
-        logger.debug("모집 등록 양식 갱신 작업 준비 중...")
         await self.bot.wait_until_ready()  # 봇이 준비될 때까지 대기
-        logger.debug("모집 등록 양식 갱신 작업 시작")
 
     @app_commands.command(name="모집_양식_갱신", description="모집 등록 양식을 갱신합니다.")
     @app_commands.checks.has_permissions(administrator=True)
@@ -2242,11 +2030,8 @@ class PartyCog(commands.Cog):
             try:
                 # 일괄 삭제 시도
                 deleted = await channel.purge(limit=50, check=lambda m: m.author.id == self.bot.user.id)
-                deleted_count = len(deleted)
-                logger.info(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에서 {deleted_count}개 메시지 일괄 삭제 성공")
             except Exception as bulk_error:
                 # 일괄 삭제 실패 시 개별 삭제 시도
-                logger.warning(f"모집 양식 갱신 - 일괄 삭제 실패, 개별 삭제 시도: {bulk_error}")
                 deleted_count = 0
                 try:
                     async for message in channel.history(limit=30):
@@ -2268,18 +2053,14 @@ class PartyCog(commands.Cog):
             try:
                 new_form = await self.create_registration_form(channel)
                 if new_form:
-                    logger.info(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에 새 양식 생성 성공 (메시지 ID: {new_form.id})")
                     await interaction.followup.send(f"모집 등록 양식이 갱신되었습니다. {deleted_count}개의 이전 양식이 삭제되었습니다.", ephemeral=True)
                 else:
-                    logger.error(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에 새 양식 생성 실패 (반환값 없음)")
                     await interaction.followup.send("모집 등록 양식 갱신이 완료되었으나, 새 양식 생성에 문제가 있을 수 있습니다.", ephemeral=True)
             except Exception as form_error:
                 logger.error(f"모집 양식 갱신 - 서버 {guild_id}의 등록 채널에 새 양식 생성 중 오류: {form_error}")
                 logger.error(traceback.format_exc())
                 await interaction.followup.send("모집 등록 양식 갱신 중 오류가 발생했습니다. 관리자에게 문의하세요.", ephemeral=True)
                 return
-            
-            logger.info(f"서버 {guild_id}의 모집 등록 양식 수동 갱신 완료")
             
         except Exception as e:
             logger.error(f"모집 양식 갱신 명령어 실행 중 오류: {e}")
@@ -2292,28 +2073,442 @@ class PartyCog(commands.Cog):
         """명령어를 동기화하는 명령어"""
         try:
             await interaction.response.defer(ephemeral=True)
-            logger.info(f"[DEBUG] 명령어 동기화 명령 실행 - 사용자: {interaction.user.id}")
             
             try:
                 # 명령어 트리 동기화
                 commands = await self.bot.tree.sync()
                 command_list = "\n".join([f"/{cmd.name} - {cmd.description}" for cmd in commands])
                 
-                logger.info(f"[DEBUG] 명령어 동기화 성공 - {len(commands)}개 명령어")
-                logger.info(f"[DEBUG] 동기화된 명령어 목록:\n{command_list}")
-                
                 await interaction.followup.send(f"명령어 동기화가 완료되었습니다. {len(commands)}개의 명령어가 등록되었습니다.", ephemeral=True)
             except Exception as e:
-                logger.error(f"[DEBUG] 명령어 동기화 실행 오류: {e}")
+                logger.error(f"명령어 동기화 실행 오류: {e}")
                 logger.error(traceback.format_exc())
                 await interaction.followup.send(f"명령어 동기화 중 오류가 발생했습니다: {str(e)}", ephemeral=True)
         except Exception as e:
-            logger.error(f"[DEBUG] 명령어 동기화 명령어 전체 오류: {e}")
+            logger.error(f"명령어 동기화 명령어 전체 오류: {e}")
             logger.error(traceback.format_exc())
             try:
                 await interaction.followup.send("명령어 실행 중 오류가 발생했습니다.", ephemeral=True)
             except:
                 pass
+
+    @tasks.loop(hours=1)  # 1시간마다 실행
+    async def cleanup_threads_and_voice_channels(self):
+        """오래된 스레드와 음성채널을 정리합니다."""
+        try:
+            # 스레드 정리
+            await self.cleanup_old_threads()
+            
+            # 음성채널 정리
+            await self.cleanup_expired_voice_channels()
+            
+        except Exception as e:
+            logger.error(f"스레드 및 음성채널 정리 작업 중 오류 발생: {e}")
+            logger.error(traceback.format_exc())
+
+    @cleanup_threads_and_voice_channels.before_loop
+    async def before_cleanup_threads_and_voice_channels(self):
+        """정리 작업 시작 전 실행되는 메서드"""
+        await self.bot.wait_until_ready()  # 봇이 준비될 때까지 대기
+
+    async def cleanup_old_threads(self):
+        """
+        스레드 정리 및 관리를 수행합니다:
+        1. 생성된 지 1일이 지난 스레드 중 archive_duration이 설정되지 않은 스레드 보관 처리
+        2. 활성 상태의 스레드 내 상호작용 버튼 재활성화
+        3. 스레드 정리 시 연결된 음성채널도 함께 정리
+        """
+        try:
+            # 현재 시간
+            current_time = datetime.now()
+            
+            # 24시간(1일) 전 시간 계산
+            one_day_ago = current_time - timedelta(days=1)
+            one_day_ago_str = one_day_ago.isoformat()
+            
+            #-------------------------------------------------------------
+            # 1. 오래된 스레드 처리 - 생성된 지 1일 이상 되고 유지기간 설정 안된 스레드
+            #-------------------------------------------------------------
+            
+            # DB에서 다음 조건에 맞는 모집 찾기:
+            # 1. 스레드가 있고(thread_id 존재)
+            # 2. 스레드 상태가 'active'
+            # 3. 생성된 지 1일 이상 지났으며
+            # 4. thread_archive_duration이 미설정(없거나 0)
+            old_thread_query = {
+                "thread_id": {"$exists": True},
+                "thread_status": "active",
+                "created_at": {"$lt": one_day_ago_str},
+                "$or": [
+                    {"thread_archive_duration": {"$exists": False}},
+                    {"thread_archive_duration": 0}
+                ]
+            }
+            
+            # 대상 모집 목록 가져오기
+            old_threads = await self.db.recruitments.find(old_thread_query).to_list(length=None)
+            
+            if old_threads:
+                
+                # 각 스레드 정리
+                for recruitment in old_threads:
+                    try:
+                        guild_id = recruitment.get("guild_id")
+                        thread_id = recruitment.get("thread_id")
+                        recruitment_id = str(recruitment.get("_id"))
+                        voice_channel_id = recruitment.get("voice_channel_id")  # 음성채널 ID 가져오기
+                        
+                        if not guild_id or not thread_id:
+                            continue
+                            
+                        # 길드 객체 가져오기
+                        guild = self.bot.get_guild(int(guild_id))
+                        if not guild:
+                            continue
+                        
+                        # 스레드 객체 가져오기
+                        thread = None
+                        try:
+                            thread = await guild.fetch_channel(int(thread_id))
+                        except discord.NotFound:
+                            # DB 상태 업데이트 (스레드가 이미 삭제됨)
+                            await self.db.recruitments.update_one(
+                                {"_id": ObjectId(recruitment_id)},
+                                {"$set": {
+                                    "thread_status": "archived",
+                                    "updated_at": current_time.isoformat()
+                                }}
+                            )
+                            
+                            # 연결된 음성채널이 있으면 삭제 시도
+                            if voice_channel_id:
+                                await self._cleanup_voice_channel(guild, voice_channel_id, recruitment_id)
+                            
+                            continue
+                        except Exception as e:
+                            logger.error(f"스레드 조회 중 오류: {e}")
+                            continue
+                        
+                        # 스레드 활성 상태 확인
+                        if thread and not thread.archived:
+                            # 스레드에 사용자가 있는지 확인
+                            member_count = 0
+                            try:
+                                async for member in thread.fetch_members():
+                                    member_count += 1
+                                    if member_count > 2:  # 봇 + 1명 이상 사용자가 있으면 중단
+                                        break
+                            except Exception as e:
+                                logger.error(f"스레드 멤버 조회 중 오류: {e}")
+                            
+                            # 사용자가 봇 외에 2명 이상 있으면 아직 사용 중이므로 건너뜀
+                            if member_count > 2:
+                                continue
+                            
+                            # 스레드에 마지막 메시지 전송 후 보관
+                            try:
+                                await thread.send("이 스레드는 생성된 지 1일이 지나 자동으로 보관됩니다.")
+                                await thread.archive(locked=True)
+                                
+                                # DB 상태 업데이트
+                                await self.db.recruitments.update_one(
+                                    {"_id": ObjectId(recruitment_id)},
+                                    {"$set": {
+                                        "thread_status": "archived",
+                                        "updated_at": current_time.isoformat()
+                                    }}
+                                )
+                                
+                                # 연결된 음성채널이 있으면 삭제
+                                if voice_channel_id:
+                                    await self._cleanup_voice_channel(guild, voice_channel_id, recruitment_id)
+                                
+                            except Exception as e:
+                                logger.error(f"스레드 보관 중 오류: {e}")
+                                logger.error(traceback.format_exc())
+                    except Exception as e:
+                        logger.error(f"스레드 처리 중 오류: {e}")
+                        logger.error(traceback.format_exc())
+                        continue
+            
+            #-------------------------------------------------------------
+            # 2. 활성 스레드 내 상호작용 버튼 재활성화
+            #-------------------------------------------------------------
+            
+            # 아직 1일이 지나지 않은 활성 스레드 조회
+            active_thread_query = {
+                "thread_id": {"$exists": True},
+                "thread_status": "active",
+                "created_at": {"$gte": one_day_ago_str}
+            }
+            
+            active_threads = await self.db.recruitments.find(active_thread_query).to_list(length=None)
+            
+            if active_threads:
+                
+                for recruitment in active_threads:
+                    try:
+                        guild_id = recruitment.get("guild_id")
+                        thread_id = recruitment.get("thread_id")
+                        recruitment_id = str(recruitment.get("_id"))
+                        
+                        if not guild_id or not thread_id:
+                            continue
+                            
+                        # 길드 객체 가져오기
+                        guild = self.bot.get_guild(int(guild_id))
+                        if not guild:
+                            continue
+                        
+                        # 스레드 객체 가져오기
+                        thread = None
+                        try:
+                            thread = await guild.fetch_channel(int(thread_id))
+                        except discord.NotFound:
+                            continue
+                        except Exception as e:
+                            logger.error(f"스레드 조회 중 오류: {e}")
+                            continue
+                        
+                        # 스레드가 존재하고 아직 보관되지 않은 경우에만 처리
+                        if thread and not thread.archived:
+                            # 스레드 내 상호작용 버튼 재활성화
+                            await self.restore_thread_interactions(thread, recruitment)
+                    except Exception as e:
+                        logger.error(f"상호작용 재활성화 중 오류: {e}")
+                        logger.error(traceback.format_exc())
+                        continue
+            
+        except Exception as e:
+            logger.error(f"스레드 정리 및 관리 중 오류 발생: {e}")
+            logger.error(traceback.format_exc())
+
+    async def _cleanup_voice_channel(self, guild, voice_channel_id, recruitment_id):
+        """스레드 정리 중 연결된 음성채널을 정리합니다."""
+        try:
+            if not voice_channel_id:
+                return
+                
+            # 음성채널 객체 가져오기
+            voice_channel = None
+            try:
+                voice_channel = guild.get_channel(int(voice_channel_id))
+            except Exception:
+                voice_channel = None
+            
+            # 음성채널이 없는 경우 (이미 삭제됨)
+            if not voice_channel:
+                # DB에서 음성채널 ID 제거
+                await self.db.recruitments.update_one(
+                    {"_id": ObjectId(recruitment_id)},
+                    {"$unset": {"voice_channel_id": ""},
+                     "$set": {"updated_at": datetime.now().isoformat()}}
+                )
+                return
+            
+            # 음성채널에 사용자가 있는지 확인
+            if voice_channel.members:
+                return
+            
+            # 음성채널 삭제
+            try:
+                await voice_channel.delete(reason="스레드 정리에 의한 연결 음성채널 삭제")
+                
+                # DB에서 음성채널 ID 제거
+                await self.db.recruitments.update_one(
+                    {"_id": ObjectId(recruitment_id)},
+                    {"$unset": {"voice_channel_id": ""},
+                     "$set": {"updated_at": datetime.now().isoformat()}}
+                )
+            except Exception as e:
+                logger.error(f"음성채널 삭제 중 오류: {e}")
+                logger.error(traceback.format_exc())
+                
+        except Exception as e:
+            logger.error(f"음성채널 정리 함수 중 오류 발생: {e}")
+            logger.error(traceback.format_exc())
+
+    async def restore_thread_interactions(self, thread, recruitment):
+        """스레드 내 상호작용 버튼을 재활성화합니다."""
+        try:
+            # 스레드 내 메시지 조회 (최신 30개)
+            messages = []
+            async for message in thread.history(limit=30):
+                # 봇이 보낸 메시지만 필터링
+                if message.author.id == self.bot.user.id:
+                    messages.append(message)
+            
+            # 처리한 상호작용 메시지 수
+            restored_count = 0
+            
+            # 스레드 생성 시 보낸 보관 기간 설정 메시지 찾기
+            for message in messages:
+                # 메시지에 임베드가 있고 비활성화된 버튼이 있는지 확인
+                if message.embeds and hasattr(message, 'components') and message.components:
+                    # 임베드 내용이 파티 모집 정보를 포함하는지 확인
+                    if any(embed.title and "파티 모집 정보" in embed.title for embed in message.embeds):
+                        # 봇의 첫 메시지일 가능성이 높으므로 스레드 보관 기간 설정 버튼이 있는지 확인
+                        if any("archive_" in comp.custom_id for comp in message.components[0].children if hasattr(comp, 'custom_id')):
+                            # 새 ThreadArchiveView 생성
+                            recruitment_id = str(recruitment.get("_id", ""))
+                            participants = recruitment.get("participants", [])
+                            dungeon_type = recruitment.get("type", "미정")
+                            dungeon_kind = recruitment.get("dungeon", "미정")
+                            dungeon_diff = recruitment.get("difficulty", "미정")
+                            recruitment_content = recruitment.get("description", "")
+                            
+                            # participants를 정수 리스트로 변환
+                            participant_ids = []
+                            for p_id in participants:
+                                try:
+                                    participant_ids.append(int(p_id))
+                                except (ValueError, TypeError):
+                                    continue
+                            
+                            try:
+                                # 기존 메시지 임베드 가져오기
+                                embed = message.embeds[0]
+                                
+                                # ThreadArchiveView 객체 생성
+                                from views.recruitment_card_views import ThreadArchiveView
+                                archive_view = ThreadArchiveView(
+                                    recruitment_id,
+                                    participant_ids,
+                                    dungeon_type,
+                                    dungeon_kind,
+                                    dungeon_diff,
+                                    recruitment_content,
+                                    self.db
+                                )
+                                
+                                # 메시지 업데이트
+                                await message.edit(embed=embed, view=archive_view)
+                                restored_count += 1
+                            except Exception as view_error:
+                                logger.error(f"스레드 {thread.id}의 보관 기간 설정 버튼 재활성화 중 오류: {view_error}")
+                                logger.error(traceback.format_exc())
+                        
+                        # 음성 채널 참여 버튼 재활성화 시도
+                        if "음성 채널에 참여하세요" in message.content:
+                            try:
+                                voice_channel_id = recruitment.get("voice_channel_id")
+                                if voice_channel_id:
+                                    # 음성 채널 객체 가져오기
+                                    voice_channel = thread.guild.get_channel(int(voice_channel_id))
+                                    if voice_channel:
+                                        # VoiceChannelView 객체 생성
+                                        from views.recruitment_card_views import VoiceChannelView
+                                        voice_view = VoiceChannelView(voice_channel_id)
+                                        
+                                        # 메시지 업데이트
+                                        await message.edit(content=message.content, view=voice_view)
+                                        restored_count += 1
+                            except Exception as voice_error:
+                                logger.error(f"스레드 {thread.id}의 음성 채널 참여 버튼 재활성화 중 오류: {voice_error}")
+                                logger.error(traceback.format_exc())
+            
+        except Exception as e:
+            logger.error(f"스레드 상호작용 재활성화 중 오류: {e}")
+            logger.error(traceback.format_exc())
+
+    async def cleanup_expired_voice_channels(self):
+        """유지기간이 지난 음성채널을 정리합니다."""
+        try:
+            # 현재 시간
+            current_time = datetime.now()
+            
+            # DB에서 다음 조건에 맞는 모집 찾기:
+            # 1. 음성채널이 있고(voice_channel_id 존재)
+            # 2. thread_archive_duration이 설정되어 있음
+            # 3. 생성된 지 thread_archive_duration(분) 이상 경과함
+            voice_channels_query = {
+                "voice_channel_id": {"$exists": True},
+                "thread_archive_duration": {"$exists": True, "$gt": 0},
+                "created_at": {"$exists": True}
+            }
+            
+            # 대상 모집 목록 가져오기
+            voice_channels = await self.db.recruitments.find(voice_channels_query).to_list(length=None)
+            
+            if not voice_channels:
+                return
+                
+            deleted_count = 0
+            
+            # 각 음성채널 정리
+            for recruitment in voice_channels:
+                try:
+                    guild_id = recruitment.get("guild_id")
+                    voice_channel_id = recruitment.get("voice_channel_id")
+                    recruitment_id = str(recruitment.get("_id"))
+                    created_at_str = recruitment.get("created_at")
+                    archive_duration = recruitment.get("thread_archive_duration", 60)  # 기본값 60분
+                    
+                    if not guild_id or not voice_channel_id or not created_at_str:
+                        continue
+                    
+                    # 생성 시간 파싱
+                    try:
+                        created_at = datetime.fromisoformat(created_at_str)
+                    except ValueError:
+                        continue
+                    
+                    # 경과 시간 계산 (분)
+                    elapsed_minutes = (current_time - created_at).total_seconds() / 60
+                    
+                    # 아직 유지기간이 지나지 않은 경우 스킵
+                    if elapsed_minutes < archive_duration:
+                        continue
+                    
+                    # 길드 객체 가져오기
+                    guild = self.bot.get_guild(int(guild_id))
+                    if not guild:
+                        continue
+                    
+                    # 음성채널 객체 가져오기
+                    voice_channel = None
+                    try:
+                        voice_channel = guild.get_channel(int(voice_channel_id))
+                    except Exception:
+                        voice_channel = None
+                    
+                    # 음성채널이 없는 경우 (이미 삭제됨)
+                    if not voice_channel:
+                        # DB에서 음성채널 ID 제거
+                        await self.db.recruitments.update_one(
+                            {"_id": ObjectId(recruitment_id)},
+                            {"$unset": {"voice_channel_id": ""},
+                             "$set": {"updated_at": current_time.isoformat()}}
+                        )
+                        continue
+                    
+                    # 음성채널에 사용자가 있는지 확인
+                    if voice_channel.members:
+                        continue
+                    
+                    # 음성채널 삭제
+                    try:
+                        await voice_channel.delete(reason="유지기간 만료")
+                        deleted_count += 1
+                        
+                        # DB에서 음성채널 ID 제거
+                        await self.db.recruitments.update_one(
+                            {"_id": ObjectId(recruitment_id)},
+                            {"$unset": {"voice_channel_id": ""},
+                             "$set": {"updated_at": current_time.isoformat()}}
+                        )
+                    except Exception as e:
+                        logger.error(f"음성채널 삭제 중 오류: {e}")
+                        logger.error(traceback.format_exc())
+                    
+                except Exception as e:
+                    logger.error(f"음성채널 정리 중 오류: {e}")
+                    logger.error(traceback.format_exc())
+                    continue
+            
+        except Exception as e:
+            logger.error(f"만료된 음성채널 정리 중 오류 발생: {e}")
+            logger.error(traceback.format_exc())
 
 async def setup(bot):
     await bot.add_cog(PartyCog(bot))
