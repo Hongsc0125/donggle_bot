@@ -23,33 +23,6 @@ JOBS = [
     "음유시인", "댄서", "악사"
 ]
 
-class ServerSelect(discord.ui.Select):
-    def __init__(self, parent_view):
-        options = [discord.SelectOption(label=server, value=server) for server in SERVERS]
-        super().__init__(placeholder="서버를 선택하세요", options=options, min_values=1, max_values=1)
-        self.parent_view = parent_view
-    
-    async def callback(self, interaction: discord.Interaction):
-        self.parent_view.server = self.values[0]
-        self.parent_view.update_components()
-        await interaction.response.edit_message(content=f"서버: {self.values[0]}\n직업을 선택해주세요.", view=self.parent_view)
-
-class JobSelect(discord.ui.Select):
-    def __init__(self, parent_view):
-        options = [discord.SelectOption(label=job, value=job) for job in JOBS]
-        super().__init__(placeholder="직업을 선택하세요", options=options, min_values=1, max_values=1)
-        self.parent_view = parent_view
-    
-    async def callback(self, interaction: discord.Interaction):
-        self.parent_view.job = self.values[0]
-        self.parent_view.update_components()
-        
-        # 직업 선택 후 닉네임 입력 창 표시
-        await interaction.response.edit_message(
-            content=f"서버: {self.parent_view.server}\n직업: {self.values[0]}\n\n이제 닉네임을 입력해주세요.",
-            view=self.parent_view
-        )
-
 class NicknameModal(discord.ui.Modal):
     def __init__(self, parent_view):
         super().__init__(title="닉네임 입력")
@@ -78,29 +51,15 @@ class NicknameButton(discord.ui.Button):
 
 class AuthView(discord.ui.View):
     def __init__(self, cog):
-        super().__init__(timeout=None)  # 10분 타임아웃
+        super().__init__(timeout=None)
         self.cog = cog
         self.server = None
         self.job = None
         self.nickname = None
         
-        # 초기 상태로 서버 선택만 표시
-        self.server_select = ServerSelect(self)
-        self.add_item(self.server_select)
-    
-    def update_components(self):
-        # 모든 기존 컴포넌트 제거
-        self.clear_items()
-        
-        # 서버 선택 완료 상태
-        if self.server and not self.job:
-            self.job_select = JobSelect(self)
-            self.add_item(self.job_select)
-        
-        # 직업 선택 완료 상태
-        elif self.server and self.job and not self.nickname:
-            self.nickname_button = NicknameButton(self)
-            self.add_item(self.nickname_button)
+        # 닉네임 입력 버튼만 표시
+        self.nickname_button = NicknameButton(self)
+        self.add_item(self.nickname_button)
     
     async def apply_auth(self, interaction: discord.Interaction):
         try:
@@ -113,104 +72,19 @@ class AuthView(discord.ui.View):
             # 닉네임 변경
             try:
                 await user.edit(nick=new_nickname)
-                #logger.info(f"사용자 {user.id} 닉네임 변경: {new_nickname}")
             except discord.Forbidden:
-                #logger.error(f"사용자 {user.id} 닉네임 변경 권한 없음")
                 await interaction.followup.send("닉네임 변경 권한이 없습니다. 서버 관리자에게 문의해주세요.", ephemeral=True)
                 return
-            
-            # 서버와 직업에 따른 역할 할당
-            await self.assign_role(interaction)
             
             # 사용자 정보 DB에 저장
             await self.save_user_data(interaction)
             
-            await interaction.followup.send(f"권한 설정이 완료되었습니다!\n서버: {self.server}\n직업: {self.job}\n닉네임: {self.nickname}", ephemeral=True)
+            await interaction.followup.send(f"닉네임이 변경되었습니다!\n서버: {self.server}\n직업: {self.job}\n닉네임: {self.nickname}", ephemeral=True)
             
         except Exception as e:
-            #logger.error(f"권한 적용 중 오류 발생: {e}")
-            #logger.error(traceback.format_exc())
-            await interaction.followup.send("권한 설정 중 오류가 발생했습니다. 나중에 다시 시도하거나 관리자에게 문의해주세요.", ephemeral=True)
-    
-    async def assign_role(self, interaction: discord.Interaction):
-        """서버와 직업에 따라 적절한 역할 부여"""
-        guild = interaction.guild
-        user = interaction.user
-        
-        try:
-            # 사용자가 이미 가진 역할 로그
-            #logger.info(f"사용자 {user.id}의 현재 역할: {[r.name for r in user.roles]}")
-            # 서버 역할 목록 로그
-            #logger.info(f"서버 {guild.id}의 역할 목록: {[r.name for r in guild.roles]}")
-            # 봇의 역할 및 권한 로그
-            bot_member = guild.get_member(self.cog.bot.user.id)
-            #logger.info(f"봇 {bot_member.id}의 역할: {[r.name for r in bot_member.roles]}")
-            #logger.info(f"봇의 관리자 권한: {bot_member.guild_permissions.administrator}")
-            #logger.info(f"봇의 역할 관리 권한: {bot_member.guild_permissions.manage_roles}")
-            
-            # 서버 역할 찾기
-            server_role = discord.utils.get(guild.roles, name=self.server)
-            if not server_role:
-                # 역할이 없으면 생성
-                try:
-                    server_role = await guild.create_role(name=self.server, reason="자동 역할 생성")
-                    #logger.info(f"서버 역할 생성: {self.server}")
-                except discord.Forbidden:
-                    #logger.error(f"역할 생성 권한 없음: {self.server}")
-                    await interaction.followup.send("서버 역할 생성 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
-                    # 계속 진행 (return 제거)
-            
-            # 직업 역할 찾기
-            job_role = discord.utils.get(guild.roles, name=self.job)
-            if not job_role:
-                # 역할이 없으면 생성
-                try:
-                    job_role = await guild.create_role(name=self.job, reason="자동 역할 생성")
-                    #logger.info(f"직업 역할 생성: {self.job}")
-                except discord.Forbidden:
-                    #logger.error(f"역할 생성 권한 없음: {self.job}")
-                    await interaction.followup.send("직업 역할 생성 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
-                    # 계속 진행 (return 제거)
-            
-            # 인증 완료 역할 찾기
-            auth_role = discord.utils.get(guild.roles, name="인증완료")
-            if not auth_role:
-                try:
-                    auth_role = await guild.create_role(name="인증완료", reason="자동 역할 생성")
-                    #logger.info("인증완료 역할 생성")
-                except discord.Forbidden:
-                    #logger.error("역할 생성 권한 없음: 인증완료")
-                    await interaction.followup.send("인증완료 역할 생성 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
-                    # 계속 진행 (return 제거)
-            
-            # 역할 부여 (각각 별도로 시도)
-            roles_to_add = []
-            if server_role:
-                roles_to_add.append(server_role)
-            if job_role:
-                roles_to_add.append(job_role)
-            if auth_role:
-                roles_to_add.append(auth_role)
-            
-            # 개별적으로 역할 할당
-            for role in roles_to_add:
-                if role not in user.roles:
-                    try:
-                        await user.add_roles(role, reason="자동 권한 설정")
-                        #logger.info(f"사용자 {user.id}에게 역할 부여: {role.name}")
-                    except discord.Forbidden:
-                        #logger.error(f"특정 역할 부여 권한 없음: {role.name}")
-                        await interaction.followup.send(f"{role.name} 역할 부여 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
-            
-            # 성공적으로 부여된 역할 확인
-            #logger.info(f"부여 시도 후 사용자 {user.id}의 역할: {[r.name for r in user.roles]}")
-        except discord.Forbidden:
-            #logger.error(f"역할 부여 권한 없음: {user.id}")
-            await interaction.followup.send("역할 부여 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
-        except Exception as e:
-            #logger.error(f"역할 부여 중 예상치 못한 오류 발생: {e}")
-            #logger.error(traceback.format_exc())
-            await interaction.followup.send("역할 부여 중 오류가 발생했습니다. 관리자에게 문의해주세요.", ephemeral=True)
+            logger.error(f"닉네임 변경 중 오류 발생: {e}")
+            logger.error(traceback.format_exc())
+            await interaction.followup.send("닉네임 변경 중 오류가 발생했습니다. 나중에 다시 시도하거나 관리자에게 문의해주세요.", ephemeral=True)
     
     async def save_user_data(self, interaction: discord.Interaction):
         """사용자 정보를 데이터베이스에 저장"""
@@ -245,12 +119,12 @@ class AuthCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db = get_database()
-        self.welcome_channels = {}  # 서버별 환영 채널 저장
-        self._load_settings()
+        self.welcome_channels = {}  # 서버별 환영 채널 ID 저장
+        self.load_welcome_channels()
         # 환영 채널 정리 작업 시작
         self.cleanup_welcome_channels.start()
     
-    def _load_settings(self):
+    def load_welcome_channels(self):
         """초기 설정을 로드합니다."""
         try:
             # 비동기적으로 설정을 로드하는 작업을 봇 루프에 추가
@@ -434,7 +308,7 @@ class AuthCog(commands.Cog):
             embed = discord.Embed(
                 title="서버 이용 안내",
                 description=(
-                    "서버 이용을 위해 다음 권한을 설정해주세요:\n\n"
+                    "서버 이용을 위해 권한을 설정해주세요:\n\n"
                     "1. **서버 권한** - 서버 내 활동을 위한 기본 권한\n"
                     "2. **직업 권한** - 파티 모집 시 필요한 직업 정보\n"
                     "3. **닉네임 권한** - 서버 내 표시될 닉네임\n\n"
@@ -470,39 +344,38 @@ class AuthCog(commands.Cog):
             except:
                 pass
     
-    @app_commands.command(name="권한", description="서버, 직업, 닉네임을 설정하여 적절한 권한을 받습니다.")
-    async def auth(self, interaction: discord.Interaction):
+    @app_commands.command(name="닉네임", description="서버, 직업, 닉네임을 설정하여 닉네임을 변경합니다.")
+    async def set_nickname(self, interaction: discord.Interaction):
         """서버, 직업, 닉네임 설정 명령어"""
         try:
-            # 이미 인증이 완료된 사용자인지 확인
-            user = interaction.user
-            auth_role = discord.utils.get(interaction.guild.roles, name="인증완료")
+            # 사용자의 권한 정보 조회
+            db = get_database()
+            user_data = await db["user_auth"].find_one({
+                "user_id": str(interaction.user.id),
+                "guild_id": str(interaction.guild.id)
+            })
             
-            if auth_role and auth_role in user.roles:
-                # 재인증 여부 확인
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        "이미 인증이 완료되었습니다. 다시 설정하시겠습니까?",
-                        view=ReauthConfirmView(self),
-                        ephemeral=True
-                    )
+            if not user_data:
+                await interaction.response.send_message(
+                    "권한 정보가 없습니다. 먼저 온보딩을 통해 권한을 설정해주세요.",
+                    ephemeral=True
+                )
                 return
             
-            # 인증 프로세스 시작
+            # 기존 권한 정보 표시
             view = AuthView(self)
+            view.server = user_data.get("server")
+            view.job = user_data.get("job")
+            
             if not interaction.response.is_done():
                 await interaction.response.send_message(
-                    "서버를 선택해주세요.",
+                    f"현재 설정된 권한:\n서버: {view.server}\n직업: {view.job}\n\n닉네임을 입력해주세요.",
                     view=view,
                     ephemeral=True
                 )
-            #logger.info(f"사용자 {user.id} 권한 설정 시작")
-        except discord.errors.NotFound:
-            logger.error("Interaction이 만료되었거나 알 수 없는 상태입니다.")
-        except discord.errors.HTTPException as e:
-            logger.error(f"Interaction 응답 중 오류 발생: {e}")
+            
         except Exception as e:
-            logger.error(f"권한 명령어 실행 중 오류 발생: {e}")
+            logger.error(f"닉네임 명령어 실행 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
             if not interaction.response.is_done():
                 await interaction.response.send_message("명령어 실행 중 오류가 발생했습니다.", ephemeral=True)
@@ -628,20 +501,6 @@ class AuthCog(commands.Cog):
         """Cog가 언로드될 때 작업을 중지합니다."""
         self.cleanup_welcome_channels.cancel()
         #logger.info("환영 채널 정리 작업 중지됨")
-
-class ReauthConfirmView(discord.ui.View):
-    def __init__(self, cog):
-        super().__init__(timeout=None)  # 1분 타임아웃
-        self.cog = cog
-    
-    @discord.ui.button(label="네", style=discord.ButtonStyle.primary)
-    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        view = AuthView(self.cog)
-        await interaction.response.edit_message(content="서버를 선택해주세요.", view=view)
-    
-    @discord.ui.button(label="아니오", style=discord.ButtonStyle.secondary)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="인증 설정이 취소되었습니다.", view=None)
 
 async def setup(bot):
     await bot.add_cog(AuthCog(bot))
