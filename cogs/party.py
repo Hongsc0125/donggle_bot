@@ -4,17 +4,12 @@ from views.recruitment_card import RecruitmentCard, CreatorOnlyButton
 from core.config import settings
 import discord
 from discord import app_commands
-from typing import Union, Any
+# from typing import Union, Any
 import asyncio
 from datetime import datetime
 from bson.objectid import ObjectId
-import uuid
-import aiosqlite
 import logging
 import traceback
-import time
-import psutil
-import copy
 
 # 로깅 설정
 logger = logging.getLogger('donggle_bot.party')
@@ -199,9 +194,8 @@ class PartyCog(commands.Cog):
             #     "1359677298604900462": True
             # }
             
-            # 모든 서버를 허용하도록 수정
-            for guild in self.bot.guilds:
-                self.allowed_guild_ids[str(guild.id)] = True
+            # for guild in self.bot.guilds:
+            #     self.allowed_guild_ids[str(guild.id)] = True
                 
             #logger.info(f"허용된 길드 ID 목록을 설정했습니다: {self.allowed_guild_ids}")
             
@@ -287,8 +281,6 @@ class PartyCog(commands.Cog):
                 # 허용 목록에 추가
                 self.allowed_guild_ids[str(guild.id)] = True
             
-            # 뷰 상태 복원
-            await self._restore_views()
             
             # 채널 초기화 - 봇이 완전히 연결된 후 진행
             await asyncio.sleep(3)  # 추가적인 안전을 위해 3초 대기
@@ -298,113 +290,6 @@ class PartyCog(commands.Cog):
             logger.info("봇 초기화 완료")
         except Exception as e:
             logger.error(f"봇 초기화 중 오류 발생: {e}")
-            logger.error(traceback.format_exc())
-
-    async def _restore_views(self):
-        """저장된 뷰 상태를 복원합니다."""
-        try:
-            #logger.info("뷰 상태 복원 시작")
-            
-            # 저장된 뷰 상태 가져오기
-            states = await self.db["view_states"].find({}).to_list(length=None)
-            
-            # 뷰 상태 복원
-            for state in states:
-                try:
-                    # 필수 필드 확인
-                    # if "channel_id" not in state:
-                        # logger.warning(f"뷰 상태에 channel_id가 없습니다: {state.get('message_id', 'unknown')}")
-                        # continue
-                    
-                    # if "message_id" not in state:
-                        # logger.warning(f"뷰 상태에 message_id가 없습니다: {state['channel_id']}")
-                        # continue
-                    
-                    # if "recruitment_id" not in state:
-                        # logger.warning(f"뷰 상태에 recruitment_id가 없습니다: {state['message_id']}")
-                        # continue
-                    
-                    # 상태 정보 추출
-                    channel_id = state["channel_id"]
-                    message_id = state["message_id"]
-                    recruitment_id = state["recruitment_id"]
-                    guild_id = state.get("guild_id", "unknown")
-                    
-                    # 채널 객체 가져오기
-                    channel = self.bot.get_channel(int(channel_id))
-                    if not channel:
-                        #logger.warning(f"채널을 찾을 수 없음: {channel_id}")
-                        continue
-                    
-                    # 메시지 객체 가져오기
-                    try:
-                        message = await channel.fetch_message(int(message_id))
-                    except discord.NotFound:
-                        #logger.warning(f"메시지를 찾을 수 없음: {message_id} (채널: {channel_id})")
-                        # 메시지가 없으면 DB에서 삭제
-                        await self.db["view_states"].delete_one({"message_id": message_id})
-                        continue
-                    except Exception as e:
-                        #logger.error(f"메시지 조회 중 오류: {e}")
-                        continue
-                    
-                    # 뷰 객체 생성
-                    view = RecruitmentCard(self.dungeons, self.db)
-                    
-                    # 뷰 상태 복원
-                    view.message = message
-                    view.selected_type = state.get("selected_type", None)
-                    view.selected_kind = state.get("selected_kind", None)
-                    view.selected_diff = state.get("selected_diff", None)
-                    view.recruitment_content = state.get("recruitment_content", "")
-                    view.max_participants = state.get("max_participants", 0)
-                    view.status = state.get("status", "모집중")
-                    view.recruitment_id = recruitment_id
-                    
-                    if "participants" in state:
-                        view.participants = []
-                        for p_id in state["participants"]:
-                            try:
-                                view.participants.append(int(p_id))
-                            except ValueError:
-                                #logger.error(f"참가자 ID 변환 오류: {p_id}")
-                                continue
-                    
-                    view.creator_id = int(state["creator_id"]) if "creator_id" in state and state["creator_id"] else None
-                    
-                    # 임베드 생성
-                    embed = view.get_embed()
-                    embed.title = "파티 모집 공고"
-                    
-                    # 뷰 업데이트
-                    try:
-                        await message.edit(embed=embed, view=view)
-                        #logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}의 상호작용을 다시 등록했습니다.")
-                    except discord.NotFound:
-                        #logger.warning(f"서버 {guild_id}의 모집 ID {recruitment_id}의 메시지({message_id})를 찾을 수 없어 업데이트를 건너뜁니다.")
-                        # DB에서 해당 메시지 관련 정보 삭제
-                        await self.db["view_states"].delete_one({"message_id": message_id})
-                        continue
-                    except Exception as e:
-                        #logger.error(f"서버 {guild_id}의 모집 ID {recruitment_id}의 메시지 업데이트 중 오류: {e}")
-                        #logger.error(traceback.format_exc())
-                        continue
-                    
-                except KeyError as e:
-                    #logger.error(f"뷰 상태 복원 중 키 오류 발생: {e}")
-                    continue
-                except Exception as e:
-                    # state에서 필요한 정보 안전하게 추출
-                    safe_guild_id = state.get("guild_id", "unknown")
-                    safe_recruitment_id = state.get("recruitment_id", "unknown")
-                    
-                    #logger.error(f"서버 {safe_guild_id}의 모집 ID {safe_recruitment_id} 뷰 상태 복원 중 오류 발생: {e}")
-                    #logger.error(traceback.format_exc())
-                    continue
-            
-            #logger.info("뷰 상태 복원 완료")
-        except Exception as e:
-            logger.error(f"뷰 상태 복원 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
 
     async def initialize_channels(self, force_retry=False):
@@ -572,7 +457,6 @@ class PartyCog(commands.Cog):
                         await self._retry_initialization(delay_seconds=2)
             
             # 초기화 완료 플래그 설정
-            logger.info("채널 초기화 완료")
             logger.info("채널 초기화 완료")
             
         except Exception as e:
@@ -1112,123 +996,110 @@ class PartyCog(commands.Cog):
     async def post_recruitment_announcement(self, guild_id, recruitment_data, view):
         """모집 공고를 공고 채널에 게시합니다."""
         try:
-            if not await self.is_allowed_guild(guild_id):
-                return None
+            # 모집 ID 확인
+            recruitment_id = view.recruitment_id
+            #logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}에 대한 공고 게시 시작")
             
-            #logger.info(f"서버 {guild_id}의 모집 ID {view.recruitment_id}에 대한 공고 게시 시작")
-            
-            # 길드 객체 가져오기
+            # 서버 설정 로드
             guild = self.bot.get_guild(int(guild_id))
             if not guild:
-                #logger.error(f"서버를 찾을 수 없음: {guild_id}")
+                #logger.error(f"서버 ID {guild_id}에 해당하는 서버를 찾을 수 없습니다.")
                 return None
             
-            # 모집 정보에서 등록 채널 ID 확인
-            registration_channel_id = str(recruitment_data.get("registration_channel_id", "0"))
-            if registration_channel_id == "0" or not registration_channel_id:
-                #logger.warning(f"모집 {view.recruitment_id}의 등록 채널 ID가 없습니다. 기본 공고 채널을 사용합니다.")
-                
-                # 공고 채널 ID 가져오기
-                announcement_channel_id = self.announcement_channels.get(guild_id)
-                if not announcement_channel_id:
-                    #logger.error(f"서버 {guild_id}의 공고 채널을 찾을 수 없음")
-                    return None
-                
-                # 채널 객체 가져오기
-                announcement_channel = guild.get_channel(int(announcement_channel_id))
-                if not announcement_channel:
-                    #logger.error(f"서버 {guild_id}의 공고 채널 객체를 가져올 수 없음: {announcement_channel_id}")
-                    return None
-                    
+            # 등록 채널 ID 가져오기
+            registration_channel_id = str(recruitment_data.get("registration_channel_id") or "")
+            
+            # 공고 채널 ID 가져오기
+            announcement_channel_id = None
+            
+            # 채널 페어 관계 확인
+            if guild_id in self.channel_pairs and registration_channel_id in self.channel_pairs[guild_id]:
+                # 페어링된 채널로 공고 채널 설정
+                announcement_channel_id = self.channel_pairs[guild_id][registration_channel_id]
+                #logger.info(f"서버 {guild_id}의 등록 채널 {registration_channel_id}에 페어링된 공고 채널 {announcement_channel_id}를 사용합니다.")
+            elif guild_id in self.announcement_channels:
+                # 기본 공고 채널 사용
+                announcement_channel_id = self.announcement_channels[guild_id]
                 #logger.info(f"서버 {guild_id}의 기본 공고 채널에 모집 공고를 게시합니다: {announcement_channel_id}")
             else:
-                # 페어링된 채널 확인
-                #logger.info(f"모집 {view.recruitment_id}의 등록 채널 ID: {registration_channel_id}")
-                
-                # 해당 등록 채널에 대응하는 공고 채널 확인
-                if guild_id in self.channel_pairs and registration_channel_id in self.channel_pairs[guild_id]:
-                    # 채널 페어링이 존재하는 경우, 해당 공고 채널 사용
-                    announcement_channel_id = self.channel_pairs[guild_id][registration_channel_id]
-                    #logger.info(f"서버 {guild_id}의 페어링된 공고 채널을 사용합니다: {announcement_channel_id}")
-                    
-                    # 채널 객체 가져오기
-                    announcement_channel = guild.get_channel(int(announcement_channel_id))
-                    if not announcement_channel:
-                        #logger.error(f"서버 {guild_id}의 페어링된 공고 채널 객체를 가져올 수 없음: {announcement_channel_id}")
-                        
-                        # 대체로 기본 공고 채널 사용
-                        fallback_channel_id = self.announcement_channels.get(guild_id)
-                        if not fallback_channel_id:
-                            #logger.error(f"서버 {guild_id}의 대체 공고 채널도 찾을 수 없음")
-                            return None
-                            
-                        announcement_channel = guild.get_channel(int(fallback_channel_id))
-                        if not announcement_channel:
-                            #logger.error(f"서버 {guild_id}의 대체 공고 채널 객체도 가져올 수 없음: {fallback_channel_id}")
-                            return None
-                            
-                        #logger.warning(f"서버 {guild_id}의 페어링된 공고 채널을 찾을 수 없어 기본 채널로 대체: {fallback_channel_id}")
-                else:
-                    # 채널 페어링이 없는 경우, 기본 공고 채널 사용
-                    #logger.info(f"서버 {guild_id}의 등록 채널 {registration_channel_id}에 대한 페어링이 없어 기본 공고 채널을 사용합니다.")
-                    announcement_channel_id = self.announcement_channels.get(guild_id)
-                    if not announcement_channel_id:
-                        #logger.error(f"서버 {guild_id}의 공고 채널을 찾을 수 없음")
-                        return None
-                    
-                    # 채널 객체 가져오기
-                    announcement_channel = guild.get_channel(int(announcement_channel_id))
-                    if not announcement_channel:
-                        #logger.error(f"서버 {guild_id}의 공고 채널 객체를 가져올 수 없음: {announcement_channel_id}")
-                        return None
+                #logger.error(f"서버 {guild_id}에 모집 공고 채널이 설정되지 않았습니다.")
+                return None
             
-            # 공고용 임베드 생성
-            embed = view.get_embed()
-            embed.title = "파티 모집 공고"
+            # 공고 채널 객체 가져오기
+            announcement_channel = guild.get_channel(int(announcement_channel_id))
+            if not announcement_channel:
+                #logger.error(f"서버 {guild_id}의 공고 채널 ID {announcement_channel_id}에 해당하는 채널을 찾을 수 없습니다.")
+                return None
             
-            # 공고용 뷰 생성 (deepcopy 대신 새 객체 생성)
-            announcement_view = RecruitmentCard(self.dungeons, self.db)
+            # 모집 정보에 기존 공고 메시지 ID가 있는지 확인
+            existing_message_id = recruitment_data.get("announcement_message_id")
+            existing_message = None
             
-            # 필요한 속성만 복사
-            announcement_view.recruitment_id = view.recruitment_id
-            announcement_view.selected_type = view.selected_type
-            announcement_view.selected_kind = view.selected_kind
-            announcement_view.selected_diff = view.selected_diff
-            announcement_view.recruitment_content = view.recruitment_content
-            announcement_view.max_participants = view.max_participants
-            announcement_view.status = view.status
-            
-            # participants 복사 (list는 얕은 복사로 충분)
-            if hasattr(view, 'participants') and view.participants:
-                announcement_view.participants = view.participants.copy()
-            else:
-                announcement_view.participants = []
-                
-            # creator_id 복사
-            if hasattr(view, 'creator_id'):
-                announcement_view.creator_id = view.creator_id
-            
-            # 기존 항목 제거 (이미 새 객체라 필요 없지만 안전을 위해 유지)
-            announcement_view.clear_items()
-            
-            # 참가하기 버튼 추가 (row 0)
-            join_button = discord.ui.Button(label="참가하기", style=discord.ButtonStyle.success, custom_id="btn_join", row=0)
-            join_button.callback = announcement_view.btn_join_callback
-            announcement_view.add_item(join_button)
-            
-            # 신청 취소 버튼 추가 (row 0)
-            cancel_button = discord.ui.Button(label="신청 취소", style=discord.ButtonStyle.danger, custom_id="btn_cancel", row=0)
-            cancel_button.callback = announcement_view.btn_cancel_callback
-            announcement_view.add_item(cancel_button)
-            
-            # 모집 취소 버튼 추가 (첫 번째 참가자에게만 보이도록 - row 1)
-            # 참가자 목록이 있고 첫 번째 참가자 ID가 있을 경우에만 추가
-            first_participant_id = None
-            if hasattr(announcement_view, 'participants') and announcement_view.participants:
+            if existing_message_id:
                 try:
-                    first_participant_id = int(announcement_view.participants[0])
-                except (ValueError, TypeError):
-                    logger.warning(f"첫 번째 참가자 ID를 정수로 변환할 수 없음: {announcement_view.participants[0]}")
+                    # 기존 메시지 가져오기 시도
+                    existing_message = await announcement_channel.fetch_message(int(existing_message_id))
+                    #logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}에 대한 기존 공고 메시지({existing_message_id})를 찾았습니다.")
+                except discord.NotFound:
+                    #logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}에 대한 기존 공고 메시지({existing_message_id})를 찾을 수 없어 새로 생성합니다.")
+                    existing_message = None
+                except Exception as e:
+                    #logger.error(f"공고 메시지 조회 중 오류: {e}")
+                    existing_message = None
+            
+            # 임베드 생성
+            embed = discord.Embed(
+                title="파티 모집 공고",
+                color=discord.Color.blue()
+            )
+            
+            # 모집 정보 필드 추가
+            dungeon_type = recruitment_data.get("type", "")
+            dungeon_name = recruitment_data.get("dungeon", "")
+            dungeon_difficulty = recruitment_data.get("difficulty", "")
+            
+            embed.add_field(name="던전 유형", value=dungeon_type, inline=True)
+            embed.add_field(name="던전 종류", value=dungeon_name, inline=True)
+            embed.add_field(name="난이도", value=dungeon_difficulty, inline=True)
+            
+            # 모집 내용
+            description = recruitment_data.get("description", "")
+            if description:
+                embed.add_field(name="모집 내용", value=description, inline=False)
+            
+            # 참가자 정보
+            max_participants = int(recruitment_data.get("max_participants", 4))
+            participants = recruitment_data.get("participants", [])
+            
+            # 참가자 목록 텍스트 생성
+            participants_text = f"현재 {len(participants)}/{max_participants}명 참가 중\n"
+            for i, p_id in enumerate(participants):
+                participants_text += f"{i+1}. <@{p_id}>\n"
+            
+            embed.add_field(name="참가자 목록", value=participants_text, inline=False)
+            
+            # 모집 ID를 푸터에 추가
+            embed.set_footer(text=f"모집 ID: {recruitment_id}")
+            
+            # 공고용 뷰 생성
+            from views.recruitment_card_views import RecruitmentCard as AnnouncementCard
+            announcement_view = AnnouncementCard(self.dungeons, self.db)
+            
+            # 뷰 상태 설정
+            announcement_view.selected_type = dungeon_type
+            announcement_view.selected_kind = dungeon_name
+            announcement_view.selected_diff = dungeon_difficulty
+            announcement_view.recruitment_content = description
+            announcement_view.max_participants = max_participants
+            announcement_view.participants = [p for p in participants]
+            announcement_view.status = "active"
+            announcement_view.recruitment_id = recruitment_id
+            
+            # 첫 번째 참가자를 생성자로 설정
+            first_participant_id = None
+            if participants and len(participants) > 0:
+                first_participant_id = int(participants[0])
+                announcement_view.creator_id = first_participant_id
             
             if first_participant_id:
                 delete_button = CreatorOnlyButton(
@@ -1242,7 +1113,20 @@ class PartyCog(commands.Cog):
                 announcement_view.add_item(delete_button)
                 #logger.debug(f"모집 취소 버튼이 첫 번째 참가자 ID {first_participant_id}에게 표시됩니다.")
             
-            # 공고 전송
+            # 기존 메시지가 있으면 수정, 없으면 새로 생성
+            if existing_message:
+                try:
+                    # 메시지 업데이트
+                    announcement_message = await existing_message.edit(embed=embed, view=announcement_view)
+                    announcement_view.message = existing_message
+                    #logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}에 대한 기존 공고 메시지({existing_message_id})를 업데이트했습니다.")
+                    return existing_message
+                except Exception as e:
+                    logger.error(f"모집 공고 메시지 업데이트 중 오류 발생: {e}")
+                    logger.error(traceback.format_exc())
+                    # 업데이트 실패 시 메시지를 새로 생성
+            
+            # 새 공고 메시지 전송
             try:
                 announcement_message = await announcement_channel.send(embed=embed, view=announcement_view)
                 announcement_view.message = announcement_message
@@ -1262,12 +1146,12 @@ class PartyCog(commands.Cog):
                 return announcement_message
                 
             except Exception as e:
-                logger.error(f"공고 메시지 전송 중 오류: {e}")
+                logger.error(f"모집 공고 게시 중 오류: {e}")
                 logger.error(traceback.format_exc())
                 return None
-                
+            
         except Exception as e:
-            logger.error(f"모집 공고 게시 중 오류: {e}")
+            logger.error(f"공고 메시지 전송 중 오류: {e}")
             logger.error(traceback.format_exc())
             return None
 
@@ -1342,11 +1226,11 @@ class PartyCog(commands.Cog):
         self.refresh_registration_forms.cancel()  # 새로 추가된 양식 갱신 작업 취소
         #logger.info("Party cog unloaded")
 
-    @tasks.loop(minutes=10)  # 10분마다 실행
+    @tasks.loop(minutes=1)  # 10분마다 실행
     async def initialize_and_cleanup(self):
         """봇의 상태를 체크하고 채널을 초기화 및 정리하는 메서드"""
         try:
-            #logger.info("봇 상태 체크 및 채널 초기화/정리 시작")
+            logger.info("봇 상태 체크 및 채널 초기화/정리 시작")
             
             # 기존 체크 로직
             #logger.info(f"연결된 서버 수: {len(self.bot.guilds)}")
@@ -1392,254 +1276,123 @@ class PartyCog(commands.Cog):
         #logger.debug("봇 상태 체크 작업 시작")
 
     async def force_cleanup_channel(self, guild_id, channel_id):
-        """특정 채널의 완료된 모집 메시지를 강제로 삭제합니다."""
-        # 허용된 길드인지 확인
-        guild = self.bot.get_guild(int(guild_id))
-        guild_name = guild.name if guild else "알 수 없음"
-        
-        if not await self.is_allowed_guild(guild_id):
-            #logger.debug(f"허용되지 않은 길드의 채널 정리 요청 무시: ID={guild_id}, 이름={guild_name}")
-            return
-            
+        """특정 채널의 메시지를 정리하고 모집 상태를 업데이트합니다."""
         try:
-            # 서버 객체 가져오기
             guild = self.bot.get_guild(int(guild_id))
             if not guild:
-                #logger.warning(f"서버를 찾을 수 없음: {guild_id}")
+                #logger.warning(f"서버 {guild_id}를 찾을 수 없습니다.")
                 return
             
-            # 채널 객체 가져오기
             channel = guild.get_channel(int(channel_id))
             if not channel:
-                #logger.warning(f"서버 {guild_id}의 공고 채널을 찾을 수 없음: {channel_id}")
+                #logger.warning(f"서버 {guild_id}의 채널 {channel_id}를 찾을 수 없습니다.")
                 return
             
-            # 서버별 모집 정보 조회
-            recruitments = await self.db.recruitments.find({"guild_id": guild_id}).to_list(None)
+            # MongoDB에서 모든 모집 상태 가져오기
+            recruitments = await self.db["recruitments"].find({"guild_id": guild_id}).to_list(length=None)
+            recruitment_status_map = {str(recruitment["_id"]): recruitment["status"] for recruitment in recruitments}
             
-            # 모집 ID와 상태 매핑 생성
-            recruitment_status_map = {}
-            recruitment_message_map = {}
-            message_recruitment_map = {}
-            
-            # 모집 정보 정리
-            for recruitment in recruitments:
-                recruitment_id = str(recruitment.get('_id'))
-                status = recruitment.get('status', 'unknown')
-                recruitment_status_map[recruitment_id] = status
-                
-                # 공고 메시지 ID가 있으면 매핑에 추가
-                if "announcement_message_id" in recruitment:
-                    message_id = recruitment["announcement_message_id"]
-                    recruitment_message_map[recruitment_id] = message_id
-                    message_recruitment_map[message_id] = recruitment_id
-            
-            #logger.debug(f"서버 {guild_id}에서 {len(recruitments)}개의 모집을 찾았습니다.")
-            
-            # 활성 모집 ID 목록 생성
-            active_recruitment_ids = set()
-            completed_recruitment_ids = set()
-            cancelled_recruitment_ids = set()
-            
-            for recruitment_id, status in recruitment_status_map.items():
-                if status == 'active':
-                    active_recruitment_ids.add(recruitment_id)
-                elif status == 'complete':
-                    completed_recruitment_ids.add(recruitment_id)
-                elif status == 'cancelled':
-                    cancelled_recruitment_ids.add(recruitment_id)
-            
-            #logger.debug(f"서버 {guild_id} - 활성 모집: {len(active_recruitment_ids)}개, 완료된 모집: {len(completed_recruitment_ids)}개, 취소된 모집: {len(cancelled_recruitment_ids)}개")
-            
-            # 채널에 있는 메시지 ID를 모집 ID와 매핑
-            channel_message_recruitment_map = {}
-            
-            # 채널의 메시지 확인
-            async for message in channel.history(limit=100):  # 최근 100개 메시지만 확인
-                try:
-                    # 메시지가 임베드를 가지고 있는지 확인
-                    if not message.embeds:
-                        continue
-        
-                    # 임베드에서 모집 ID 찾기
-                    recruitment_id = None
-                    
-                    # 임베드의 푸터에서 모집 ID 찾기
-                    if message.embeds[0].footer and message.embeds[0].footer.text:
-                        footer_text = message.embeds[0].footer.text
-                        if footer_text.startswith("모집 ID:"):
-                            recruitment_id = footer_text.replace("모집 ID:", "").strip()
-                            if " | " in recruitment_id:
-                                recruitment_id = recruitment_id.split(" | ")[0].strip()
-                    
-                    # 임베드의 필드에서 모집 ID 찾기 (이전 방식 호환)
-                    if not recruitment_id:
-                        for field in message.embeds[0].fields:
-                            if field.name == "모집 ID":
-                                recruitment_id = field.value
-                                break
-        
-                    if recruitment_id:
-                        channel_message_recruitment_map[str(message.id)] = recruitment_id
-                        
-                        # 활성 모집에 대한 메시지 매핑 업데이트
-                        if recruitment_id in active_recruitment_ids:
-                            # DB에 메시지 ID 업데이트 (기존 정보가 없을 경우)
-                            if recruitment_id not in recruitment_message_map or recruitment_message_map[recruitment_id] != str(message.id):
-                                await self.db["recruitments"].update_one(
-                                    {"_id": ObjectId(recruitment_id)},
-                                    {"$set": {
-                                        "announcement_message_id": str(message.id),
-                                        "announcement_channel_id": str(channel.id),
-                                        "guild_id": guild_id,
-                                        "updated_at": datetime.now().isoformat()
-                                    }}
-                                )
-                                #logger.info(f"서버 {guild_id}에서 발견된 활성 모집 {recruitment_id}의 메시지 ID를 업데이트했습니다: {message.id}")
-        
-                except Exception as e:
-                    #logger.error(f"메시지 처리 중 오류 발생: {e}")
-                    #logger.error(traceback.format_exc())
-                    continue
-            
-            # 활성 모집 중 메시지가 없는 경우 새로 게시
-            active_recruitments_to_post = []
-            for recruitment_id in active_recruitment_ids:
-                # 채널 내 메시지에서 해당 모집 ID를 찾지 못한 경우
-                if not any(r_id == recruitment_id for r_id in channel_message_recruitment_map.values()):
-                    # 해당 모집 데이터 찾기
-                    recruitment = next((r for r in recruitments if str(r.get('_id')) == recruitment_id), None)
-                    if recruitment:
-                        active_recruitments_to_post.append(recruitment)
-            
-            # 누락된 활성 모집 공고는 process_active_recruitments에서 처리하도록 변경
-            # 활성 모집 ID별로 채널 내 메시지 집계
-            duplicate_messages = {}  # 여기에 duplicate_messages 변수 정의 추가
-            for message_id, recruitment_id in channel_message_recruitment_map.items():
-                if recruitment_id in active_recruitment_ids:
-                    if recruitment_id not in duplicate_messages:
-                        duplicate_messages[recruitment_id] = []
-                    duplicate_messages[recruitment_id].append(message_id)
-            
-            # 모집 ID별로 2개 이상의 메시지가 있으면 가장 최근 것을 제외하고 삭제
-            for recruitment_id, message_ids in duplicate_messages.items():
-                if len(message_ids) > 1:
-                    #logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}에 대한 중복 메시지 발견: {len(message_ids)}개")
-                    # 메시지 ID를 정수로 변환하여 정렬 (최신 메시지가 큰 ID 값을 가짐)
-                    sorted_message_ids = sorted([int(mid) for mid in message_ids], reverse=True)
-                    # 가장 최신 메시지를 제외한 나머지 삭제
-                    for message_id in sorted_message_ids[1:]:
-                        try:
-                            message = await channel.fetch_message(message_id)
-                            await message.delete()
-                            #logger.info(f"서버 {guild_id}의 중복 메시지 삭제: {message_id}")
-                        except Exception as e:
-                            logger.error(f"중복 메시지 삭제 중 오류: {e}")
-            
-            # 완료되거나 취소된 모집의 메시지 삭제
             deleted_count = 0
             updated_count = 0
+            
+            # 채널의 메시지 가져오기
             async for message in channel.history(limit=100):
                 try:
-                    # 메시지가 임베드를 가지고 있는지 확인
-                    if not message.embeds:
+                    # 봇이 보낸 메시지만 처리
+                    if message.author.id != self.bot.user.id:
                         continue
-        
-                    # 임베드에서 모집 ID 찾기
-                    recruitment_id = None
-                    if message.embeds[0].footer and message.embeds[0].footer.text:
-                        footer_text = message.embeds[0].footer.text
-                        if footer_text.startswith("모집 ID:"):
-                            recruitment_id = footer_text.replace("모집 ID:", "").strip()
-                            if " | " in recruitment_id:
-                                recruitment_id = recruitment_id.split(" | ")[0].strip()
                     
-                    # 임베드의 필드에서 모집 ID 찾기 (이전 방식 호환)
-                    if not recruitment_id:
-                        for field in message.embeds[0].fields:
-                            if field.name == "모집 ID":
-                                recruitment_id = field.value
-                                break
-        
-                    if recruitment_id:
-                        status = recruitment_status_map.get(recruitment_id, "unknown")
-                        
-                        # 완료되거나 취소된 모집의 메시지만 삭제
-                        if status in ["complete", "cancelled"]:
-                            #logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}의 상태가 {status}이므로 메시지를 삭제합니다.")
-                            await message.delete()
-                            deleted_count += 1
-                        elif status == "active":
-                            #logger.debug(f"서버 {guild_id}의 모집 ID {recruitment_id}는 아직 활성 상태입니다.")
+                    # 임베드가 있는 메시지만 처리
+                    if not message.embeds or not message.embeds[0].footer:
+                        continue
+                    
+                    # 모집 ID 추출
+                    footer_text = message.embeds[0].footer.text
+                    if not footer_text or "모집 ID:" not in footer_text:
+                        continue
+                    
+                    recruitment_id = footer_text.split("모집 ID:")[1].strip()
+                    
+                    # 모집 상태 확인
+                    status = recruitment_status_map.get(recruitment_id)
+                    
+                    # 활성 모집 메시지 업데이트
+                    if status == "active":
+                        try:
+                            # 모집 정보 조회
+                            recruitment_data = await self.db["recruitments"].find_one({"_id": ObjectId(recruitment_id)})
+
+                            logger.info("asd",recruitment_data)
+
+                            if not recruitment_data:
+                                #logger.warning(f"서버 {guild_id}의 모집 ID {recruitment_id}에 대한 데이터를 찾을 수 없습니다.")
+                                continue
                             
-                            # 활성 모집의 경우 상호작용을 갱신
-                            try:
-                                # 모집 데이터 가져오기
-                                recruitment = await self.db.recruitments.find_one({"_id": ObjectId(recruitment_id)})
-                                if recruitment:
-                                    # 해당 모집 데이터로 뷰 생성
-                                    from views.recruitment_card import RecruitmentCard
-                                    view = RecruitmentCard(self.dungeons, self.db)
-                                    view.recruitment_id = recruitment_id
-                                    view.selected_type = recruitment.get("dungeon_type")
-                                    view.selected_kind = recruitment.get("dungeon_kind") 
-                                    view.selected_diff = recruitment.get("dungeon_difficulty")
-                                    view.recruitment_content = recruitment.get("content")
-                                    view.max_participants = recruitment.get("max_participants")
-                                    view.status = recruitment.get("status", "active")
-                                    view.participants = [str(p) for p in recruitment.get("participants", [])]
-                                    
-                                    # 임베드 생성
-                                    embed = view.get_embed()
-                                    
-                                    # 버튼 설정
-                                    view.clear_items()
-                                    
-                                    # 참가하기 버튼 추가
-                                    join_button = discord.ui.Button(label="참가하기", style=discord.ButtonStyle.success, custom_id="btn_join", row=0)
-                                    join_button.callback = view.btn_join_callback
-                                    view.add_item(join_button)
-                                    
-                                    # 신청 취소 버튼 추가
-                                    cancel_button = discord.ui.Button(label="신청 취소", style=discord.ButtonStyle.danger, custom_id="btn_cancel", row=0)
-                                    cancel_button.callback = view.btn_cancel_callback
-                                    view.add_item(cancel_button)
-                                    
-                                    # 첫 번째 참가자에게만 모집 취소 버튼 표시
-                                    if view.participants and len(view.participants) > 0:
-                                        first_participant_id = None
-                                        try:
-                                            first_participant_id = int(view.participants[0]) if isinstance(view.participants[0], str) else view.participants[0]
-                                        except (ValueError, TypeError):
-                                            logger.warning(f"첫 번째 참가자 ID를 정수로 변환할 수 없음: {view.participants[0]}")
-                                        
-                                        if first_participant_id:
-                                            from views.recruitment_card import CreatorOnlyButton
-                                            delete_button = CreatorOnlyButton(
-                                                label="모집 취소",
-                                                style=discord.ButtonStyle.danger,
-                                                custom_id="btn_delete",
-                                                callback=view.btn_delete_callback,
-                                                creator_id=first_participant_id,
-                                                row=1
-                                            )
-                                            view.add_item(delete_button)
-                                    
-                                    # 메시지 업데이트
-                                    await message.edit(embed=embed, view=view)
-                                    view.message = message
-                                    updated_count += 1
-                                    #logger.debug(f"서버 {guild_id}의 모집 ID {recruitment_id}의 메시지를 갱신했습니다.")
-                            except Exception as e:
-                                logger.error(f"활성 모집 메시지 갱신 중 오류 발생: {e}")
-                                logger.error(traceback.format_exc())
-                        elif recruitment_id not in recruitment_status_map:
-                            # 데이터베이스에 없는 모집의 메시지는 삭제
-                            #logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}가 데이터베이스에 존재하지 않아 메시지를 삭제합니다.")
-                            await message.delete()
-                            deleted_count += 1
-                        else:
-                            logger.debug(f"서버 {guild_id}의 모집 ID {recruitment_id}의 상태가 {status}로 처리되지 않았습니다.")
+                            # 임베드 업데이트
+                            embed = message.embeds[0]
+                            
+                            # 참가자 정보 업데이트
+                            max_participants = int(recruitment_data.get("max_participants", 4))
+                            participants = recruitment_data.get("participants", [])
+                            
+                            # 참가자 필드 업데이트
+                            participants_text = f"현재 {len(participants)}/{max_participants}명 참가 중\n"
+                            for i, p_id in enumerate(participants):
+                                participants_text += f"{i+1}. <@{p_id}>\n"
+                            
+                            # 참가자 필드 찾아서 업데이트
+                            for i, field in enumerate(embed.fields):
+                                if field.name == "참가자 목록" or "참가자" in field.name:
+                                    embed.set_field_at(i, name="참가자 목록", value=participants_text, inline=False)
+                                    break
+                            
+                            # 뷰 객체 생성
+                            from views.recruitment_card_views import RecruitmentCard as AnnouncementCard
+                            view = AnnouncementCard(self.dungeons, self.db)
+                            
+                            # 뷰 상태 설정
+                            view.selected_type = recruitment_data.get("type", "")
+                            view.selected_kind = recruitment_data.get("dungeon", "")
+                            view.selected_diff = recruitment_data.get("difficulty", "")
+                            view.recruitment_content = recruitment_data.get("description", "")
+                            view.max_participants = max_participants
+                            view.participants = [p for p in participants]
+                            view.status = "active"
+                            view.recruitment_id = recruitment_id
+                            view.message = message
+                            
+                            # 첫 번째 참가자를 생성자로 설정
+                            first_participant_id = None
+                            if participants and len(participants) > 0:
+                                first_participant_id = int(participants[0])
+                                view.creator_id = first_participant_id
+                            
+                            if first_participant_id:
+                                delete_button = CreatorOnlyButton(
+                                    label="모집 취소", 
+                                    style=discord.ButtonStyle.danger, 
+                                    custom_id="btn_delete", 
+                                    callback=view.btn_delete_callback,
+                                    creator_id=first_participant_id,
+                                    row=1
+                                )
+                                view.add_item(delete_button)
+                            
+                            # 메시지 업데이트
+                            await message.edit(embed=embed, view=view)
+                            view.message = message
+                            updated_count += 1
+                            #logger.debug(f"서버 {guild_id}의 모집 ID {recruitment_id}의 메시지를 갱신했습니다.")
+                        except Exception as e:
+                            logger.error(f"활성 모집 메시지 갱신 중 오류 발생: {e}")
+                            logger.error(traceback.format_exc())
+                    elif recruitment_id not in recruitment_status_map:
+                        # 데이터베이스에 없는 모집의 메시지는 삭제
+                        #logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}가 데이터베이스에 존재하지 않아 메시지를 삭제합니다.")
+                        await message.delete()
+                        deleted_count += 1
+                    else:
+                        logger.debug(f"서버 {guild_id}의 모집 ID {recruitment_id}의 상태가 {status}로 처리되지 않았습니다.")
         
                 except Exception as e:
                     logger.error(f"메시지 처리 중 오류 발생: {e}")
