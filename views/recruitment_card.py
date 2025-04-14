@@ -97,10 +97,10 @@ class RecruitmentCard(ui.View):
         register_button.disabled = not button_enabled
         
         # 디버그 로그 추가
-        logger.debug(f"_setup_buttons - 모집 등록 버튼 활성화 상태: {not register_button.disabled}")
-        logger.debug(f"_setup_buttons - 필수값 상태 (각각): type={has_type}, kind={has_kind}, diff={has_diff}, content={has_content}, max_participants={has_max_participants}")
-        logger.debug(f"_setup_buttons - 필수값 상태 (all 함수): {button_enabled}")
-        logger.debug(f"_setup_buttons - 필수값 실제 값: type={self.selected_type}, kind={self.selected_kind}, diff={self.selected_diff}, content_len={len(self.recruitment_content) if self.recruitment_content else 0}, max_participants={self.max_participants}")
+        # logger.debug(f"_setup_buttons - 모집 등록 버튼 활성화 상태: {not register_button.disabled}")
+        # logger.debug(f"_setup_buttons - 필수값 상태 (각각): type={has_type}, kind={has_kind}, diff={has_diff}, content={has_content}, max_participants={has_max_participants}")
+        # logger.debug(f"_setup_buttons - 필수값 상태 (all 함수): {button_enabled}")
+        # logger.debug(f"_setup_buttons - 필수값 실제 값: type={self.selected_type}, kind={self.selected_kind}, diff={self.selected_diff}, content_len={len(self.recruitment_content) if self.recruitment_content else 0}, max_participants={self.max_participants}")
         
         self.add_item(register_button)
 
@@ -252,7 +252,7 @@ class RecruitmentCard(ui.View):
                 else:
                     participants_text += f"{i+1}. <@{p_id}> (알 수 없는 사용자)\n"
             except Exception as e:
-                logger.error(f"참가자 정보 조회 중 오류: {e}")
+                #logger.error(f"참가자 정보 조회 중 오류: {e}")
                 participants_text += f"{i+1}. <@{p_id}>\n"
         
         # 참가자 필드 업데이트
@@ -275,7 +275,7 @@ class RecruitmentCard(ui.View):
             
     async def update_embed(self, interaction: discord.Interaction = None):
         # 디버그 로그 추가
-        logger.debug("update_embed - 시작")
+        #logger.debug("update_embed - 시작")
         
         try:
             # 모든 UI 요소 제거
@@ -334,12 +334,12 @@ class RecruitmentCard(ui.View):
                 register_button.disabled = not button_enabled
                 
                 # 디버그 로그 추가
-                logger.debug(f"update_embed - 모집 등록 버튼 활성화 상태: {not register_button.disabled}")
-                logger.debug(f"update_embed - 필수값 상태 (각각): type={has_type}, kind={has_kind}, diff={has_diff}, content={has_content}, max_participants={has_max_participants}")
-                logger.debug(f"update_embed - 필수값 상태 (all 함수): {button_enabled}")
+                # logger.debug(f"update_embed - 모집 등록 버튼 활성화 상태: {not register_button.disabled}")
+                # logger.debug(f"update_embed - 필수값 상태 (각각): type={has_type}, kind={has_kind}, diff={has_diff}, content={has_content}, max_participants={has_max_participants}")
+                # logger.debug(f"update_embed - 필수값 상태 (all 함수): {button_enabled}")
                 if self.recruitment_content:
                     content_preview = self.recruitment_content[:30] + "..." if len(self.recruitment_content) > 30 else self.recruitment_content
-                    logger.debug(f"update_embed - 모집 내용 미리보기: {content_preview}")
+                    # logger.debug(f"update_embed - 모집 내용 미리보기: {content_preview}")
                 
                 self.add_item(register_button)
             else:
@@ -370,22 +370,22 @@ class RecruitmentCard(ui.View):
                             row=4
                         )
                         self.add_item(delete_button)
-                        logger.debug(f"모집 취소 버튼이 첫 번째 참가자 ID {first_participant_id}에게 표시됩니다.")
+                        # logger.debug(f"모집 취소 버튼이 첫 번째 참가자 ID {first_participant_id}에게 표시됩니다.")
             
             # 임베드 업데이트
             embed = self.get_embed()
             
             # 디버그 로그 추가
-            logger.debug("update_embed - 임베드 생성 완료, 메시지 편집 시작")
-            logger.debug(f"update_embed - 선택된 값들: type={self.selected_type}, kind={self.selected_kind}, diff={self.selected_diff}, max_participants={self.max_participants}")
-            logger.debug(f"update_embed - 선택 메뉴 placeholder: type={self.type_select.placeholder}, kind={self.kind_select.placeholder}, diff={self.diff_select.placeholder}, max_participants={self.max_participants_select.placeholder}")
+            # logger.debug("update_embed - 임베드 생성 완료, 메시지 편집 시작")
+            # logger.debug(f"update_embed - 선택된 값들: type={self.selected_type}, kind={self.selected_kind}, diff={self.selected_diff}, max_participants={self.max_participants}")
+            # logger.debug(f"update_embed - 선택 메뉴 placeholder: type={self.type_select.placeholder}, kind={self.kind_select.placeholder}, diff={self.diff_select.placeholder}, max_participants={self.max_participants_select.placeholder}")
             
             await self.message.edit(embed=embed, view=self)
-            logger.debug("update_embed - 완료")
+            #logger.debug("update_embed - 완료")
         except Exception as e:
-            logger.error(f"update_embed - 메시지 편집 중 오류 발생: {e}")
+            #logger.error(f"update_embed - 메시지 편집 중 오류 발생: {e}")
             import traceback
-            logger.error(f"update_embed - 상세 오류: {traceback.format_exc()}")
+            #logger.error(f"update_embed - 상세 오류: {traceback.format_exc()}")
     
     async def type_callback(self, interaction: Interaction):
         self.selected_type = interaction.data["values"][0]
@@ -393,8 +393,8 @@ class RecruitmentCard(ui.View):
         self.selected_diff = None
         
         # 디버그 로그 추가
-        logger.debug(f"type_callback - 던전 타입 선택됨: {self.selected_type}")
-        logger.debug(f"type_callback - 종류와 난이도 초기화: kind={self.selected_kind}, diff={self.selected_diff}")
+        # logger.debug(f"type_callback - 던전 타입 선택됨: {self.selected_type}")
+        # logger.debug(f"type_callback - 종류와 난이도 초기화: kind={self.selected_kind}, diff={self.selected_diff}")
         
         await interaction.response.defer()
         await self.update_embed(interaction)
@@ -404,8 +404,8 @@ class RecruitmentCard(ui.View):
         self.selected_diff = None
         
         # 디버그 로그 추가
-        logger.debug(f"kind_callback - 던전 종류 선택됨: {self.selected_kind}")
-        logger.debug(f"kind_callback - 난이도 초기화: diff={self.selected_diff}")
+        # logger.debug(f"kind_callback - 던전 종류 선택됨: {self.selected_kind}")
+        # logger.debug(f"kind_callback - 난이도 초기화: diff={self.selected_diff}")
         
         await interaction.response.defer()
         await self.update_embed(interaction)
@@ -414,7 +414,7 @@ class RecruitmentCard(ui.View):
         self.selected_diff = interaction.data["values"][0]
         
         # 디버그 로그 추가
-        logger.debug(f"diff_callback - 난이도 선택됨: {self.selected_diff}")
+        # logger.debug(f"diff_callback - 난이도 선택됨: {self.selected_diff}")
         
         await interaction.response.defer()
         await self.update_embed(interaction)
@@ -423,7 +423,7 @@ class RecruitmentCard(ui.View):
         self.max_participants = int(interaction.data["values"][0])
         
         # 디버그 로그 추가
-        logger.debug(f"max_participants_callback - 최대 인원 설정: {self.max_participants}")
+        # logger.debug(f"max_participants_callback - 최대 인원 설정: {self.max_participants}")
         
         await interaction.response.defer()
         await self.update_embed(interaction)
@@ -466,7 +466,7 @@ class RecruitmentCard(ui.View):
                     break
             
             if not party_cog:
-                logger.error("PartyCog를 찾을 수 없습니다.")
+                #logger.error("PartyCog를 찾을 수 없습니다.")
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("모집 등록 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.", ephemeral=True)
                 await asyncio.sleep(2)
@@ -476,7 +476,7 @@ class RecruitmentCard(ui.View):
             # DB에 모집 정보 저장
             result = await self.db["recruitments"].insert_one(recruitment_data)
             self.recruitment_id = str(result.inserted_id)
-            logger.info(f"새 모집 등록: {self.recruitment_id}")
+            #logger.info(f"새 모집 등록: {self.recruitment_id}")
             
             # 참가자 목록 초기화 (모집자가 첫 번째 참가자)
             self.participants = [str(interaction.user.id)]
@@ -517,9 +517,9 @@ class RecruitmentCard(ui.View):
             await party_cog.create_registration_form(interaction.channel)
             
         except Exception as e:
-            logger.error(f"모집 등록 중 오류 발생: {e}")
+            #logger.error(f"모집 등록 중 오류 발생: {e}")
             import traceback
-            logger.error(f"상세 오류: {traceback.format_exc()}")
+            #logger.error(f"상세 오류: {traceback.format_exc()}")
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("모집 등록 중 오류가 발생했습니다.", ephemeral=True)
@@ -542,7 +542,7 @@ class RecruitmentCard(ui.View):
             try:
                 first_participant_id = int(self.participants[0]) if isinstance(self.participants[0], str) else self.participants[0]
             except (ValueError, TypeError):
-                logger.warning(f"첫 번째 참가자 ID를 정수로 변환할 수 없음: {self.participants[0]}")
+                #logger.warning(f"첫 번째 참가자 ID를 정수로 변환할 수 없음: {self.participants[0]}")
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("참가자 정보 처리 중 오류가 발생했습니다.", ephemeral=True)
                 await asyncio.sleep(2)
@@ -593,9 +593,9 @@ class RecruitmentCard(ui.View):
                 self.add_item(cancelled_text)
                 await interaction.message.edit(view=self)
             except Exception as e:
-                logger.error(f"btn_delete_callback - 메시지 편집 오류: {e}")
+                #logger.error(f"btn_delete_callback - 메시지 편집 오류: {e}")
                 import traceback
-                logger.error(f"btn_delete_callback - 상세 오류: {traceback.format_exc()}")
+                #logger.error(f"btn_delete_callback - 상세 오류: {traceback.format_exc()}")
             
             # 모집 취소 메시지
             await interaction.response.defer(ephemeral=True)
@@ -604,9 +604,9 @@ class RecruitmentCard(ui.View):
             await msg.delete()
             
         except Exception as e:
-            logger.error(f"모집 취소 중 오류 발생: {e}")
+            #logger.error(f"모집 취소 중 오류 발생: {e}")
             import traceback
-            logger.error(f"상세 오류: {traceback.format_exc()}")
+            #logger.error(f"상세 오류: {traceback.format_exc()}")
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("모집 취소 중 오류가 발생했습니다.", ephemeral=True)
@@ -623,7 +623,7 @@ class RecruitmentCard(ui.View):
             # 이 작업을 시작한 사용자 ID 기록 (디버깅용)
             actual_initiator = initiator_id or interaction.user.id
             
-            logger.debug(f"스레드 생성 시작 - 모집자 ID: {creator_id}, 액션 수행자 ID: {actual_initiator}")
+            #logger.debug(f"스레드 생성 시작 - 모집자 ID: {creator_id}, 액션 수행자 ID: {actual_initiator}")
             
             # 모집자만 스레드 생성 가능하도록 체크
             # if interaction.user.id != creator_id:
@@ -636,7 +636,7 @@ class RecruitmentCard(ui.View):
             
             # 스레드 이름 생성
             thread_name = f"{self.selected_kind} {self.selected_diff}"
-            logger.debug(f"스레드 이름 생성: {thread_name}")
+            #logger.debug(f"스레드 이름 생성: {thread_name}")
             
             # 스레드를 생성할 채널 찾기 (설정에서 불러오기)
             guild = interaction.guild
@@ -653,7 +653,7 @@ class RecruitmentCard(ui.View):
             # 지정된 채널이 없으면 현재 채널 사용
             if not thread_channel:
                 thread_channel = interaction.channel
-                logger.warning(f"지정된 스레드 채널이 없어 현재 채널을 사용합니다: {thread_channel.id}")
+                #logger.warning(f"지정된 스레드 채널이 없어 현재 채널을 사용합니다: {thread_channel.id}")
             
             try:
                 # 비밀 스레드 생성
@@ -662,11 +662,11 @@ class RecruitmentCard(ui.View):
                     type=discord.ChannelType.private_thread,  # 비밀 스레드로 변경
                     auto_archive_duration=1440  # 기본값 1일로 변경
                 )
-                logger.debug(f"비밀 스레드 생성 성공 - 스레드 ID: {thread.id}")
+                #logger.debug(f"비밀 스레드 생성 성공 - 스레드 ID: {thread.id}")
                 
                 # 모집자를 제외한 다른 참가자들 (초대될 사람들)
                 other_participants = [p for p in self.participants if int(p) != creator_id]
-                logger.debug(f"초대할 참가자 수: {len(other_participants)}")
+                #logger.debug(f"초대할 참가자 수: {len(other_participants)}")
                 
                 # 참가자를 직접 추가하지 않고 초대 메시지만 전송
                 # if other_participants:
@@ -679,7 +679,7 @@ class RecruitmentCard(ui.View):
                 #     )
                 
             except discord.Forbidden:
-                logger.error("스레드 생성 실패 - 권한 부족")
+                #logger.error("스레드 생성 실패 - 권한 부족")
                 if not interaction.response.is_done():
                     await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("스레드 생성 권한이 없습니다.", ephemeral=True)
@@ -687,7 +687,7 @@ class RecruitmentCard(ui.View):
                 await msg.delete()
                 return
             except discord.HTTPException as e:
-                logger.error(f"스레드 생성 실패 - HTTP 오류: {e}")
+                #logger.error(f"스레드 생성 실패 - HTTP 오류: {e}")
                 if not interaction.response.is_done():
                     await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("스레드 생성 중 오류가 발생했습니다.", ephemeral=True)
@@ -717,18 +717,18 @@ class RecruitmentCard(ui.View):
             # ================ 비밀 음성 채널 생성 로직 추가 ================
             voice_channel = None
             try:
-                logger.debug("비밀 임시 음성 채널 생성 시작")
+                #logger.debug("비밀 임시 음성 채널 생성 시작")
                 
                 # 음성 채널을 생성할 카테고리 찾기 - 스레드의 부모 채널과 동일한 카테고리 사용
                 category = thread.parent.category
                 if not category:
-                    logger.warning("스레드 부모 채널의 카테고리를 찾을 수 없습니다. 기본 카테고리를 사용합니다.")
+                    #logger.warning("스레드 부모 채널의 카테고리를 찾을 수 없습니다. 기본 카테고리를 사용합니다.")
                     # 기본 카테고리가 없으면 채널이 속한 첫 번째 카테고리 사용
                     for category_obj in interaction.guild.categories:
                         category = category_obj
                         break
                 
-                logger.debug(f"음성 채널 생성 카테고리: {category.name if category else '없음'}")
+                #logger.debug(f"음성 채널 생성 카테고리: {category.name if category else '없음'}")
                 
                 # 비밀 음성 채널 생성
                 voice_channel = await interaction.guild.create_voice_channel(
@@ -738,7 +738,7 @@ class RecruitmentCard(ui.View):
                     reason="파티 음성 채팅"
                 )
                 
-                logger.debug(f"음성 채널 생성 성공: {voice_channel.name} (ID: {voice_channel.id})")
+                #logger.debug(f"음성 채널 생성 성공: {voice_channel.name} (ID: {voice_channel.id})")
                 
                 # 채널 권한 설정 - 기본적으로 모든 사용자에게 비공개
                 await voice_channel.set_permissions(
@@ -747,7 +747,7 @@ class RecruitmentCard(ui.View):
                     connect=False        # 연결할 수 없음
                 )
                 
-                logger.debug("음성 채널 기본 권한 설정 완료")
+                #logger.debug("음성 채널 기본 권한 설정 완료")
                 
                 # 봇에게 권한 부여
                 await voice_channel.set_permissions(
@@ -759,7 +759,7 @@ class RecruitmentCard(ui.View):
                     manage_channels=True  # 채널 관리 권한 추가
                 )
                 
-                logger.debug("봇 권한 설정 완료")
+                #logger.debug("봇 권한 설정 완료")
                 
                 # 참가자들에게 채널 접근 권한 부여
                 participants_with_access = 0
@@ -774,9 +774,9 @@ class RecruitmentCard(ui.View):
                                 speak=True          # 말할 수 있음
                             )
                             participants_with_access += 1
-                            logger.debug(f"참가자 권한 설정 완료: {member.display_name}")
+                            #logger.debug(f"참가자 권한 설정 완료: {member.display_name}")
                         else:
-                            logger.warning(f"참가자를 찾을 수 없음: {participant_id}")
+                            #logger.warning(f"참가자를 찾을 수 없음: {participant_id}")
                             # 실패한 경우 API에서 직접 멤버 조회 시도
                             try:
                                 fetched_member = await interaction.guild.fetch_member(int(participant_id))
@@ -788,14 +788,14 @@ class RecruitmentCard(ui.View):
                                         speak=True
                                     )
                                     participants_with_access += 1
-                                    logger.debug(f"참가자 권한 설정 완료 (fetch): {fetched_member.display_name}")
+                                    #logger.debug(f"참가자 권한 설정 완료 (fetch): {fetched_member.display_name}")
                             except Exception as fetch_error:
                                 logger.error(f"참가자 fetch 중 오류: {fetch_error}")
                     except Exception as e:
                         logger.warning(f"음성 채널 권한 설정 중 오류 (ID: {participant_id}): {e}")
                 
-                logger.info(f"비밀 음성 채널 생성 성공: {voice_channel.name} (ID: {voice_channel.id})")
-                logger.info(f"{participants_with_access}/{len(self.participants)} 참가자에게 권한 부여 완료")
+                #logger.info(f"비밀 음성 채널 생성 성공: {voice_channel.name} (ID: {voice_channel.id})")
+                #logger.info(f"{participants_with_access}/{len(self.participants)} 참가자에게 권한 부여 완료")
                 
                 # DB에 음성 채널 정보 저장
                 await self.db["recruitments"].update_one(
@@ -806,7 +806,7 @@ class RecruitmentCard(ui.View):
                         "updated_at": now
                     }}
                 )
-                logger.debug(f"음성 채널 정보 DB 저장 성공 - 채널 ID: {voice_channel.id}")
+                #logger.debug(f"음성 채널 정보 DB 저장 성공 - 채널 ID: {voice_channel.id}")
                 
                 # # 음성 채널 참여 버튼 생성용 뷰 가져오기
                 # from views.recruitment_card_views import VoiceChannelView
@@ -817,8 +817,8 @@ class RecruitmentCard(ui.View):
                 # logger.debug(f"음성 채널 참여 버튼 생성 완료: 메시지 ID={voice_msg.id}")
                 
             except Exception as e:
-                logger.error(f"비밀 음성 채널 생성 중 오류: {e}")
-                logger.error(traceback.format_exc())
+                #logger.error(f"비밀 음성 채널 생성 중 오류: {e}")
+                #logger.error(traceback.format_exc())
                 voice_channel = None
             # ================ 비밀 음성 채널 생성 로직 끝 ================
             
@@ -837,7 +837,7 @@ class RecruitmentCard(ui.View):
             try:
                 # 스레드에 보관 기간 설정 메시지 전송
                 archive_msg = await thread.send(f"<@{creator_id}> 스레드 보관 기간을 설정해주세요.", view=archive_view)
-                logger.debug(f"스레드 보관 기간 설정 메시지 전송 완료: {archive_msg.id}")
+                #logger.debug(f"스레드 보관 기간 설정 메시지 전송 완료: {archive_msg.id}")
                 
                 # 모집에 참여한 사람들 멘션 - 개별 초대 메시지로 변경하므로 제거
                 # 대신 모집 정보만 전송
@@ -847,9 +847,9 @@ class RecruitmentCard(ui.View):
                 
                 # 정보 메시지 전송
                 info_msg = await thread.send(info_message)
-                logger.debug(f"파티 정보 메시지 전송 완료: {info_msg.id}")
+                #logger.debug(f"파티 정보 메시지 전송 완료: {info_msg.id}")
                 
-                logger.debug("스레드 초기 메시지 전송 성공")
+                #logger.debug("스레드 초기 메시지 전송 성공")
                 
                 # 모집자에게만 비밀 메시지로 알림 (ephemeral)
                 if not interaction.response.is_done():
@@ -863,16 +863,16 @@ class RecruitmentCard(ui.View):
                 await interaction.followup.send(notification_text, ephemeral=True)
                 
             except Exception as e:
-                logger.error(f"스레드 초기 메시지 전송 실패: {e}")
-                logger.error(traceback.format_exc())
+                #logger.error(f"스레드 초기 메시지 전송 실패: {e}")
+                #logger.error(traceback.format_exc())
                 # 메시지 전송 실패해도 스레드 생성은 완료된 것으로 간주
                 if not interaction.response.is_done():
                     await interaction.response.defer(ephemeral=True)
                 await interaction.followup.send("스레드가 생성되었지만 메시지 전송에 실패했습니다.", ephemeral=True)
             
         except Exception as e:
-            logger.error(f"스레드 생성 중 오류 발생: {e}")
-            logger.error(traceback.format_exc())
+            #logger.error(f"스레드 생성 중 오류 발생: {e}")
+            #logger.error(traceback.format_exc())
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
             msg = await interaction.followup.send("스레드 생성 중 오류가 발생했습니다.", ephemeral=True)
@@ -888,7 +888,7 @@ class RecruitmentCard(ui.View):
             # 모집 정보 가져오기
             recruitment = await self.db["recruitments"].find_one({"_id": ObjectId(self.recruitment_id)})
             if not recruitment:
-                logger.error(f"모집 정보를 찾을 수 없음: {self.recruitment_id}")
+                #logger.error(f"모집 정보를 찾을 수 없음: {self.recruitment_id}")
                 msg = await interaction.followup.send("모집 정보를 찾을 수 없습니다.", ephemeral=True)
                 await asyncio.sleep(2)
                 await msg.delete()
@@ -1017,9 +1017,9 @@ class RecruitmentCard(ui.View):
                 await msg.delete()
             
         except Exception as e:
-            logger.error(f"참가 신청 중 오류 발생: {e}")
+            #logger.error(f"참가 신청 중 오류 발생: {e}")
             import traceback
-            logger.error(f"상세 오류: {traceback.format_exc()}")
+            #logger.error(f"상세 오류: {traceback.format_exc()}")
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
             msg = await interaction.followup.send("참가 신청 중 오류가 발생했습니다.", ephemeral=True)
@@ -1032,7 +1032,7 @@ class RecruitmentCard(ui.View):
             # 모집 정보 가져오기
             recruitment = await self.db["recruitments"].find_one({"_id": ObjectId(self.recruitment_id)})
             if not recruitment:
-                logger.error(f"모집 정보를 찾을 수 없음: {self.recruitment_id}")
+                #logger.error(f"모집 정보를 찾을 수 없음: {self.recruitment_id}")
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("모집 정보를 찾을 수 없습니다.", ephemeral=True)
                 await asyncio.sleep(2)
@@ -1099,9 +1099,9 @@ class RecruitmentCard(ui.View):
             await msg.delete()
             
         except Exception as e:
-            logger.error(f"참가 취소 중 오류 발생: {e}")
+            #logger.error(f"참가 취소 중 오류 발생: {e}")
             import traceback
-            logger.error(f"상세 오류: {traceback.format_exc()}")
+            #logger.error(f"상세 오류: {traceback.format_exc()}")
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("참가 취소 중 오류가 발생했습니다.", ephemeral=True)
@@ -1267,9 +1267,9 @@ class ThreadArchiveView(discord.ui.View):
                 await thread.send("파티원분들은 스레드에 참가해주세요!")
             
         except Exception as e:
-            logger.error(f"스레드 보관 기간 설정 중 오류 발생: {e}")
+            #logger.error(f"스레드 보관 기간 설정 중 오류 발생: {e}")
             import traceback
-            logger.error(f"상세 오류: {traceback.format_exc()}")
+            #logger.error(f"상세 오류: {traceback.format_exc()}")
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send(f"스레드 보관 기간 설정 중 오류가 발생했습니다: {e}", ephemeral=True)

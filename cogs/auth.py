@@ -113,9 +113,9 @@ class AuthView(discord.ui.View):
             # 닉네임 변경
             try:
                 await user.edit(nick=new_nickname)
-                logger.info(f"사용자 {user.id} 닉네임 변경: {new_nickname}")
+                #logger.info(f"사용자 {user.id} 닉네임 변경: {new_nickname}")
             except discord.Forbidden:
-                logger.error(f"사용자 {user.id} 닉네임 변경 권한 없음")
+                #logger.error(f"사용자 {user.id} 닉네임 변경 권한 없음")
                 await interaction.followup.send("닉네임 변경 권한이 없습니다. 서버 관리자에게 문의해주세요.", ephemeral=True)
                 return
             
@@ -128,8 +128,8 @@ class AuthView(discord.ui.View):
             await interaction.followup.send(f"권한 설정이 완료되었습니다!\n서버: {self.server}\n직업: {self.job}\n닉네임: {self.nickname}", ephemeral=True)
             
         except Exception as e:
-            logger.error(f"권한 적용 중 오류 발생: {e}")
-            logger.error(traceback.format_exc())
+            #logger.error(f"권한 적용 중 오류 발생: {e}")
+            #logger.error(traceback.format_exc())
             await interaction.followup.send("권한 설정 중 오류가 발생했습니다. 나중에 다시 시도하거나 관리자에게 문의해주세요.", ephemeral=True)
     
     async def assign_role(self, interaction: discord.Interaction):
@@ -139,14 +139,14 @@ class AuthView(discord.ui.View):
         
         try:
             # 사용자가 이미 가진 역할 로그
-            logger.info(f"사용자 {user.id}의 현재 역할: {[r.name for r in user.roles]}")
+            #logger.info(f"사용자 {user.id}의 현재 역할: {[r.name for r in user.roles]}")
             # 서버 역할 목록 로그
-            logger.info(f"서버 {guild.id}의 역할 목록: {[r.name for r in guild.roles]}")
+            #logger.info(f"서버 {guild.id}의 역할 목록: {[r.name for r in guild.roles]}")
             # 봇의 역할 및 권한 로그
             bot_member = guild.get_member(self.cog.bot.user.id)
-            logger.info(f"봇 {bot_member.id}의 역할: {[r.name for r in bot_member.roles]}")
-            logger.info(f"봇의 관리자 권한: {bot_member.guild_permissions.administrator}")
-            logger.info(f"봇의 역할 관리 권한: {bot_member.guild_permissions.manage_roles}")
+            #logger.info(f"봇 {bot_member.id}의 역할: {[r.name for r in bot_member.roles]}")
+            #logger.info(f"봇의 관리자 권한: {bot_member.guild_permissions.administrator}")
+            #logger.info(f"봇의 역할 관리 권한: {bot_member.guild_permissions.manage_roles}")
             
             # 서버 역할 찾기
             server_role = discord.utils.get(guild.roles, name=self.server)
@@ -154,9 +154,9 @@ class AuthView(discord.ui.View):
                 # 역할이 없으면 생성
                 try:
                     server_role = await guild.create_role(name=self.server, reason="자동 역할 생성")
-                    logger.info(f"서버 역할 생성: {self.server}")
+                    #logger.info(f"서버 역할 생성: {self.server}")
                 except discord.Forbidden:
-                    logger.error(f"역할 생성 권한 없음: {self.server}")
+                    #logger.error(f"역할 생성 권한 없음: {self.server}")
                     await interaction.followup.send("서버 역할 생성 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
                     # 계속 진행 (return 제거)
             
@@ -166,9 +166,9 @@ class AuthView(discord.ui.View):
                 # 역할이 없으면 생성
                 try:
                     job_role = await guild.create_role(name=self.job, reason="자동 역할 생성")
-                    logger.info(f"직업 역할 생성: {self.job}")
+                    #logger.info(f"직업 역할 생성: {self.job}")
                 except discord.Forbidden:
-                    logger.error(f"역할 생성 권한 없음: {self.job}")
+                    #logger.error(f"역할 생성 권한 없음: {self.job}")
                     await interaction.followup.send("직업 역할 생성 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
                     # 계속 진행 (return 제거)
             
@@ -177,9 +177,9 @@ class AuthView(discord.ui.View):
             if not auth_role:
                 try:
                     auth_role = await guild.create_role(name="인증완료", reason="자동 역할 생성")
-                    logger.info("인증완료 역할 생성")
+                    #logger.info("인증완료 역할 생성")
                 except discord.Forbidden:
-                    logger.error("역할 생성 권한 없음: 인증완료")
+                    #logger.error("역할 생성 권한 없음: 인증완료")
                     await interaction.followup.send("인증완료 역할 생성 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
                     # 계속 진행 (return 제거)
             
@@ -197,19 +197,19 @@ class AuthView(discord.ui.View):
                 if role not in user.roles:
                     try:
                         await user.add_roles(role, reason="자동 권한 설정")
-                        logger.info(f"사용자 {user.id}에게 역할 부여: {role.name}")
+                        #logger.info(f"사용자 {user.id}에게 역할 부여: {role.name}")
                     except discord.Forbidden:
-                        logger.error(f"특정 역할 부여 권한 없음: {role.name}")
+                        #logger.error(f"특정 역할 부여 권한 없음: {role.name}")
                         await interaction.followup.send(f"{role.name} 역할 부여 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
             
             # 성공적으로 부여된 역할 확인
-            logger.info(f"부여 시도 후 사용자 {user.id}의 역할: {[r.name for r in user.roles]}")
+            #logger.info(f"부여 시도 후 사용자 {user.id}의 역할: {[r.name for r in user.roles]}")
         except discord.Forbidden:
-            logger.error(f"역할 부여 권한 없음: {user.id}")
+            #logger.error(f"역할 부여 권한 없음: {user.id}")
             await interaction.followup.send("역할 부여 권한이 없습니다. 관리자에게 문의해주세요.", ephemeral=True)
         except Exception as e:
-            logger.error(f"역할 부여 중 예상치 못한 오류 발생: {e}")
-            logger.error(traceback.format_exc())
+            #logger.error(f"역할 부여 중 예상치 못한 오류 발생: {e}")
+            #logger.error(traceback.format_exc())
             await interaction.followup.send("역할 부여 중 오류가 발생했습니다. 관리자에게 문의해주세요.", ephemeral=True)
     
     async def save_user_data(self, interaction: discord.Interaction):
@@ -236,7 +236,7 @@ class AuthView(discord.ui.View):
                 upsert=True
             )
             
-            logger.info(f"사용자 {user.id} 권한 정보 저장 완료")
+            #logger.info(f"사용자 {user.id} 권한 정보 저장 완료")
         except Exception as e:
             logger.error(f"사용자 정보 저장 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
@@ -278,7 +278,7 @@ class AuthCog(commands.Cog):
                 if "welcome_channel_id" in settings:
                     self.welcome_channels[guild_id] = settings["welcome_channel_id"]
             
-            logger.info(f"환영 채널 ID를 로드했습니다: {self.welcome_channels}")
+            #logger.info(f"환영 채널 ID를 로드했습니다: {self.welcome_channels}")
         except Exception as e:
             logger.error(f"환영 채널 ID 로드 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
@@ -289,7 +289,7 @@ class AuthCog(commands.Cog):
         try:
             # 명령어 동기화 시도
             await self.bot.tree.sync()
-            logger.info("AuthCog: 명령어 트리가 성공적으로 동기화되었습니다.")
+            #logger.info("AuthCog: 명령어 트리가 성공적으로 동기화되었습니다.")
         except Exception as e:
             logger.error(f"AuthCog: 명령어 트리 동기화 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
@@ -302,10 +302,10 @@ class AuthCog(commands.Cog):
             await interaction.response.defer(ephemeral=True)
             await self.bot.tree.sync()
             await interaction.followup.send("모든 명령어가 성공적으로 동기화되었습니다.", ephemeral=True)
-            logger.info(f"관리자 {interaction.user.id}가 명령어 동기화를 실행했습니다.")
+            #logger.info(f"관리자 {interaction.user.id}가 명령어 동기화를 실행했습니다.")
         except Exception as e:
-            logger.error(f"명령어 동기화 중 오류 발생: {e}")
-            logger.error(traceback.format_exc())
+            #logger.error(f"명령어 동기화 중 오류 발생: {e}")
+            #logger.error(traceback.format_exc())
             await interaction.followup.send("명령어 동기화 중 오류가 발생했습니다.", ephemeral=True)
     
     @commands.Cog.listener()
@@ -345,7 +345,7 @@ class AuthCog(commands.Cog):
                     # 메시지 전송
                     try:
                         await channel.send(content=member.mention, embed=embed)
-                        logger.info(f"사용자 {member.id}에게 환영 메시지 전송")
+                        #logger.info(f"사용자 {member.id}에게 환영 메시지 전송")
                     except Exception as e:
                         logger.error(f"환영 메시지 전송 중 오류 발생: {e}")
                         logger.error(traceback.format_exc())
@@ -354,7 +354,7 @@ class AuthCog(commands.Cog):
                         try:
                             await asyncio.sleep(1)
                             await channel.send(content=member.mention, embed=embed)
-                            logger.info(f"사용자 {member.id}에게 환영 메시지 재전송")
+                            #logger.info(f"사용자 {member.id}에게 환영 메시지 재전송")
                         except Exception as e:
                             logger.error(f"환영 메시지 재전송 중 오류 발생: {e}")
                             logger.error(traceback.format_exc())
@@ -398,7 +398,7 @@ class AuthCog(commands.Cog):
             if not auth_role:
                 try:
                     auth_role = await interaction.guild.create_role(name="인증완료", reason="환영 채널 설정을 위한 자동 역할 생성")
-                    logger.info(f"인증완료 역할 생성: {auth_role.id}")
+                    #logger.info(f"인증완료 역할 생성: {auth_role.id}")
                 except Exception as e:
                     logger.error(f"인증완료 역할 생성 중 오류 발생: {e}")
             
@@ -409,7 +409,7 @@ class AuthCog(commands.Cog):
                     read_messages=False,  # 채널 자체를 볼 수 없게 설정
                     send_messages=False
                 )
-                logger.info(f"인증완료 역할에 대한 환영 채널 권한 설정: 채널 숨김")
+                #logger.info(f"인증완료 역할에 대한 환영 채널 권한 설정: 채널 숨김")
             
             # 슬로우모드 설정 (1시간)
             await channel.edit(slowmode_delay=3600)  # 3600초 = 1시간
@@ -451,7 +451,7 @@ class AuthCog(commands.Cog):
             try:
                 message = await channel.send(embed=embed)
                 await message.pin()
-                logger.info(f"서버 {guild_id}의 환영 채널에 고정 메시지 설정")
+                #logger.info(f"서버 {guild_id}의 환영 채널에 고정 메시지 설정")
             except Exception as e:
                 logger.error(f"고정 메시지 설정 중 오류 발생: {e}")
             
@@ -461,7 +461,7 @@ class AuthCog(commands.Cog):
                 "인증 완료된 사용자에게는 채널이 보이지 않으며, 일반 메시지는 1시간 슬로우모드로 제한됩니다.",
                 ephemeral=True
             )
-            logger.info(f"서버 {guild_id}의 환영 채널 설정: {channel_id}")
+            #logger.info(f"서버 {guild_id}의 환영 채널 설정: {channel_id}")
         except Exception as e:
             logger.error(f"환영 채널 설정 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
@@ -496,7 +496,7 @@ class AuthCog(commands.Cog):
                     view=view,
                     ephemeral=True
                 )
-            logger.info(f"사용자 {user.id} 권한 설정 시작")
+            #logger.info(f"사용자 {user.id} 권한 설정 시작")
         except discord.errors.NotFound:
             logger.error("Interaction이 만료되었거나 알 수 없는 상태입니다.")
         except discord.errors.HTTPException as e:
@@ -511,7 +511,7 @@ class AuthCog(commands.Cog):
     async def test_command(self, interaction: discord.Interaction):
         """테스트 용도의 명령어"""
         await interaction.response.send_message("테스트 명령어가 작동합니다!", ephemeral=True)
-        logger.info(f"사용자 {interaction.user.id}가 테스트 명령어를 실행했습니다.")
+        #logger.info(f"사용자 {interaction.user.id}가 테스트 명령어를 실행했습니다.")
     
     @app_commands.command(name="닉네임확인", description="특정 사용자의 서버, 직업, 닉네임 정보를 확인합니다.")
     @app_commands.checks.has_permissions(administrator=True)
@@ -539,30 +539,30 @@ class AuthCog(commands.Cog):
             else:
                 await interaction.response.send_message("이 사용자는 인증된 닉네임 형식이 아닙니다.", ephemeral=True)
         except Exception as e:
-            logger.error(f"닉네임 확인 중 오류 발생: {e}")
-            logger.error(traceback.format_exc())
+            #logger.error(f"닉네임 확인 중 오류 발생: {e}")
+            #logger.error(traceback.format_exc())
             await interaction.response.send_message("명령어 실행 중 오류가 발생했습니다.", ephemeral=True)
 
     @tasks.loop(minutes=10)
     async def cleanup_welcome_channels(self):
         """환영 채널의 메시지를 주기적으로 정리합니다."""
-        logger.info("환영 채널 정리 작업 시작")
+        #logger.info("환영 채널 정리 작업 시작")
         
         for guild_id, channel_id in self.welcome_channels.items():
             try:
                 # 서버 객체 가져오기
                 guild = self.bot.get_guild(int(guild_id))
                 if not guild:
-                    logger.warning(f"서버를 찾을 수 없음: {guild_id}")
+                    #logger.warning(f"서버를 찾을 수 없음: {guild_id}")
                     continue
                 
                 # 채널 객체 가져오기
                 channel = guild.get_channel(int(channel_id))
                 if not channel:
-                    logger.warning(f"서버 {guild_id}의 환영 채널을 찾을 수 없음: {channel_id}")
+                    #logger.warning(f"서버 {guild_id}의 환영 채널을 찾을 수 없음: {channel_id}")
                     continue
                 
-                logger.info(f"서버 {guild_id}({guild.name})의 환영 채널 {channel_id}({channel.name}) 정리 시작")
+                #logger.info(f"서버 {guild_id}({guild.name})의 환영 채널 {channel_id}({channel.name}) 정리 시작")
                 
                 # 고정된 메시지 찾기
                 pinned_messages = await channel.pins()
@@ -574,7 +574,8 @@ class AuthCog(commands.Cog):
                         return message.id not in pinned_message_ids
                     
                     deleted = await channel.purge(limit=100, check=is_not_pinned)
-                    logger.info(f"서버 {guild_id}의 환영 채널에서 {len(deleted)}개 메시지 삭제 완료")
+                    if len(deleted) > 0:
+                        logger.info(f"서버 {guild_id}의 환영 채널에서 {len(deleted)}개 메시지 삭제 완료")
                 except discord.errors.Forbidden:
                     logger.error(f"서버 {guild_id}의 환영 채널에서 메시지 삭제 권한이 없습니다.")
                 except Exception as e:
@@ -603,7 +604,7 @@ class AuthCog(commands.Cog):
                         
                         message = await channel.send(embed=embed)
                         await message.pin()
-                        logger.info(f"서버 {guild_id}의 환영 채널에 새 고정 메시지 생성")
+                        #logger.info(f"서버 {guild_id}의 환영 채널에 새 고정 메시지 생성")
                     except Exception as e:
                         logger.error(f"서버 {guild_id}의 환영 채널에 고정 메시지 생성 중 오류 발생: {e}")
                         logger.error(traceback.format_exc())
@@ -621,12 +622,12 @@ class AuthCog(commands.Cog):
     async def before_cleanup(self):
         """정리 작업 시작 전 봇이 준비될 때까지 대기합니다."""
         await self.bot.wait_until_ready()
-        logger.info("환영 채널 정리 작업 준비 완료")
+        #logger.info("환영 채널 정리 작업 준비 완료")
 
     def cog_unload(self):
         """Cog가 언로드될 때 작업을 중지합니다."""
         self.cleanup_welcome_channels.cancel()
-        logger.info("환영 채널 정리 작업 중지됨")
+        #logger.info("환영 채널 정리 작업 중지됨")
 
 class ReauthConfirmView(discord.ui.View):
     def __init__(self, cog):

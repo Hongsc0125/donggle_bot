@@ -58,20 +58,19 @@ class DonggleBot(commands.Bot):
         for extension in extensions:
             try:
                 await self.load_extension(extension)
-                logger.info(f"확장 기능 로드 완료: {extension}")
+                #logger.info(f"확장 기능 로드 완료: {extension}")
             except Exception as e:
                 logger.error(f"확장 기능 로드 실패: {extension} - {e}")
-                logger.error(traceback.format_exc())
+                #logger.error(traceback.format_exc())
         
         # 봇이 준비되면 자동으로 명령어 동기화
         try:
-            # 모든 코그가 로드된 후 명령어 동기화
             synced_commands = await self.tree.sync()
             logger.info(f"명령어 트리가 동기화되었습니다. {len(synced_commands)}개 명령어 등록됨.")
         except Exception as e:
             logger.error(f"명령어 트리 동기화 중 오류 발생: {e}")
             logger.warning("슬래시 명령어를 사용하려면 애플리케이션 ID가 필요합니다.")
-            logger.warning("real.env 파일에 APPLICATION_ID=봇ID를 추가해주세요.")
+            #logger.warning("real.env 파일에 APPLICATION_ID=봇ID를 추가해주세요.")
         
         # 스레드 이벤트 리스너 등록
         self.add_listener(self.on_thread_delete, 'on_thread_delete')
@@ -80,13 +79,13 @@ class DonggleBot(commands.Bot):
     async def on_ready(self):
         self.reconnect_attempts = 0
         self.last_reconnect = datetime.datetime.now()
-        logger.info(f"{self.user} 접속 완료!")
+        #logger.info(f"{self.user} 접속 완료!")
         
         if settings.APPLICATION_ID:
             logger.info(f"슬래시 명령어 사용 준비 완료!")
         else:
             logger.warning("슬래시 명령어를 사용하려면 애플리케이션 ID가 필요합니다.")
-            logger.warning("real.env 파일에 APPLICATION_ID=봇ID를 추가해주세요.")
+            #logger.warning("real.env 파일에 APPLICATION_ID=봇ID를 추가해주세요.")
     
     async def on_disconnect(self):
         """연결이 끊어졌을 때 호출됩니다."""
@@ -108,44 +107,44 @@ class DonggleBot(commands.Bot):
     async def on_thread_delete(self, thread):
         """스레드가 삭제되면 연결된 음성 채널도 삭제합니다."""
         try:
-            logger.info(f"스레드 삭제 감지: {thread.name} (ID: {thread.id})")
+            #logger.info(f"스레드 삭제 감지: {thread.name} (ID: {thread.id})")
             
             # 스레드와 연결된 모집 정보 찾기
             party_cog = self.get_cog('PartyCog')
-            if not party_cog or not party_cog.db:
-                logger.warning("PartyCog 또는 DB 연결을 찾을 수 없습니다.")
+            if not party_cog or not hasattr(party_cog,"db"):
+                #logger.warning("PartyCog 또는 DB 연결을 찾을 수 없습니다.")
                 return
             
-            logger.info(f"스레드 {thread.id}에 연결된 모집 정보 조회 시도")
+            #logger.info(f"스레드 {thread.id}에 연결된 모집 정보 조회 시도")
             
             # DB에서 스레드 ID로 모집 정보 조회
             recruitment = await party_cog.db["recruitments"].find_one({"thread_id": str(thread.id)})
             if not recruitment:
-                logger.info(f"삭제된 스레드 {thread.id}와 연결된 모집 정보가 없습니다.")
+                #logger.info(f"삭제된 스레드 {thread.id}와 연결된 모집 정보가 없습니다.")
                 return
             
-            logger.info(f"스레드 {thread.id}와 연결된 모집 정보 찾음: {recruitment.get('_id')}")
+            #logger.info(f"스레드 {thread.id}와 연결된 모집 정보 찾음: {recruitment.get('_id')}")
             
             # 음성 채널이 있는지 확인
             voice_channel_id = recruitment.get("voice_channel_id")
             if not voice_channel_id:
-                logger.info(f"스레드 {thread.id}와 연결된 음성 채널이 없습니다.")
+                #logger.info(f"스레드 {thread.id}와 연결된 음성 채널이 없습니다.")
                 return
             
-            logger.info(f"스레드 {thread.id}와 연결된 음성 채널 발견: {voice_channel_id}")
+            #logger.info(f"스레드 {thread.id}와 연결된 음성 채널 발견: {voice_channel_id}")
             
             # 음성 채널 찾기
             try:
                 voice_channel = thread.guild.get_channel(int(voice_channel_id))
                 if voice_channel:
-                    logger.info(f"스레드 {thread.id}와 연결된 음성 채널 {voice_channel.id} 삭제 시도")
+                    #logger.info(f"스레드 {thread.id}와 연결된 음성 채널 {voice_channel.id} 삭제 시도")
                     await voice_channel.delete(reason="연결된 스레드가 삭제됨")
-                    logger.info(f"음성 채널 {voice_channel.id} 삭제 완료")
-                else:
-                    logger.warning(f"음성 채널 {voice_channel_id}를 찾을 수 없습니다.")
+                    #logger.info(f"음성 채널 {voice_channel.id} 삭제 완료")
+                # else:
+                    #logger.warning(f"음성 채널 {voice_channel_id}를 찾을 수 없습니다.")
             except Exception as e:
                 logger.error(f"음성 채널 삭제 중 오류 발생: {e}")
-                logger.error(traceback.format_exc())
+                #logger.error(traceback.format_exc())
             
             # 모집 정보 업데이트 (음성 채널 정보 제거)
             try:
@@ -157,41 +156,41 @@ class DonggleBot(commands.Bot):
                 logger.info(f"모집 정보에서 음성 채널 정보 제거 완료: {update_result.modified_count}개 문서 수정됨")
             except Exception as db_error:
                 logger.error(f"DB 업데이트 중 오류: {db_error}")
-                logger.error(traceback.format_exc())
+                #logger.error(traceback.format_exc())
             
         except Exception as e:
             logger.error(f"스레드 삭제 처리 중 오류 발생: {e}")
-            logger.error(traceback.format_exc())
+            #logger.error(traceback.format_exc())
     
     async def on_thread_update(self, before, after):
         """스레드가 아카이브되면 연결된 음성 채널을 삭제합니다."""
         try:
             # 스레드가 아카이브되었는지 확인
             if not before.archived and after.archived:
-                logger.info(f"스레드 아카이브 감지: {after.name} (ID: {after.id})")
+                #logger.info(f"스레드 아카이브 감지: {after.name} (ID: {after.id})")
                 
                 # 스레드와 연결된 모집 정보 찾기
                 party_cog = self.get_cog('PartyCog')
-                if not party_cog or not party_cog.db:
-                    logger.warning("PartyCog 또는 DB 연결을 찾을 수 없습니다.")
+                if not party_cog or hasattr(party_cog,"db"):
+                    #logger.warning("PartyCog 또는 DB 연결을 찾을 수 없습니다.")
                     return
                 
                 # DB에서 스레드 ID로 모집 정보 조회
                 recruitment = await party_cog.db["recruitments"].find_one({"thread_id": str(after.id)})
                 if not recruitment:
-                    logger.info(f"아카이브된 스레드 {after.id}와 연결된 모집 정보가 없습니다.")
+                    #logger.info(f"아카이브된 스레드 {after.id}와 연결된 모집 정보가 없습니다.")
                     return
                 
                 # 음성 채널이 있는지 확인
                 voice_channel_id = recruitment.get("voice_channel_id")
                 if not voice_channel_id:
-                    logger.info(f"스레드 {after.id}와 연결된 음성 채널이 없습니다.")
+                    #logger.info(f"스레드 {after.id}와 연결된 음성 채널이 없습니다.")
                     
                     # 음성 채널은 없지만 스레드가 아카이브되었으므로 스레드 완전 삭제 시도
                     try:
                         # 스레드 완전 삭제
                         await after.delete()
-                        logger.info(f"아카이브된 스레드 {after.id} 삭제 완료")
+                        #logger.info(f"아카이브된 스레드 {after.id} 삭제 완료")
                         
                         # 모집 정보 업데이트
                         await party_cog.db["recruitments"].update_one(
@@ -203,7 +202,7 @@ class DonggleBot(commands.Bot):
                         )
                     except Exception as e:
                         logger.error(f"아카이브된 스레드 삭제 중 오류 발생: {e}")
-                        logger.error(traceback.format_exc())
+                        #logger.error(traceback.format_exc())
                     
                     return
                 
@@ -211,24 +210,24 @@ class DonggleBot(commands.Bot):
                 try:
                     voice_channel = after.guild.get_channel(int(voice_channel_id))
                     if voice_channel:
-                        logger.info(f"스레드 {after.id}와 연결된 음성 채널 {voice_channel.id} 삭제 시도")
+                        #logger.info(f"스레드 {after.id}와 연결된 음성 채널 {voice_channel.id} 삭제 시도")
                         await voice_channel.delete(reason="연결된 스레드가 아카이브됨")
-                        logger.info(f"음성 채널 {voice_channel.id} 삭제 완료")
+                        #logger.info(f"음성 채널 {voice_channel.id} 삭제 완료")
                     else:
-                        logger.warning(f"음성 채널 {voice_channel_id}를 찾을 수 없습니다.")
+                        #logger.warning(f"음성 채널 {voice_channel_id}를 찾을 수 없습니다.")
                         
                         # 음성 채널을 찾을 수 없는 경우 재시도
                         try:
                             # 채널 ID 재확인
                             all_channels = list(after.guild.channels)
-                            logger.info(f"모든 채널 목록: {[c.id for c in all_channels]}")
+                            #logger.info(f"모든 채널 목록: {[c.id for c in all_channels]}")
                             
                             # 보이스 채널 직접 검색
                             for channel in all_channels:
                                 if channel.id == int(voice_channel_id):
-                                    logger.info(f"보이스 채널 {channel.id} 발견, 삭제 시도")
+                                    #logger.info(f"보이스 채널 {channel.id} 발견, 삭제 시도")
                                     await channel.delete(reason="연결된 스레드가 아카이브됨 (재시도)")
-                                    logger.info(f"보이스 채널 {channel.id} 삭제 완료")
+                                    #logger.info(f"보이스 채널 {channel.id} 삭제 완료")
                                     break
                         except Exception as retry_error:
                             logger.error(f"보이스 채널 재시도 삭제 중 오류: {retry_error}")
@@ -246,7 +245,7 @@ class DonggleBot(commands.Bot):
                 # 아카이브된 스레드 완전 삭제 시도
                 try:
                     await after.delete()
-                    logger.info(f"아카이브된 스레드 {after.id} 삭제 완료")
+                    #logger.info(f"아카이브된 스레드 {after.id} 삭제 완료")
                     
                     # 모집 정보 상태 업데이트
                     await party_cog.db["recruitments"].update_one(
@@ -305,10 +304,10 @@ class DonggleBot(commands.Bot):
         try:
             if self.is_ready():
                 status_options = [
-                    "파티 모집 중",
-                    "던전 탐험 중",
-                    "레이드 준비 중",
-                    "모험자 모집 중"
+                    "파티 모집",
+                    "던전 탐험",
+                    "레이드 준비",
+                    "모험자 모집"
                 ]
                 
                 activity_type = random.choice([
@@ -321,7 +320,7 @@ class DonggleBot(commands.Bot):
                 activity = discord.Activity(type=activity_type, name=status_text)
                 
                 await self.change_presence(activity=activity)
-                logger.info(f"봇 상태 업데이트: {activity_type.name} {status_text}")
+                #logger.info(f"봇 상태 업데이트: {activity_type.name} {status_text}")
         except Exception as e:
             logger.error(f"상태 업데이트 중 오류 발생: {str(e)}")
     
@@ -333,7 +332,7 @@ class DonggleBot(commands.Bot):
             
             # PartyCog 가져오기
             party_cog = self.get_cog('PartyCog')
-            if not party_cog or not party_cog.db:
+            if not party_cog or not hasattr(party_cog, 'db'):
                 logger.warning("PartyCog 또는 DB 연결을 찾을 수 없어 정리 작업을 건너뜁니다.")
                 return
             
@@ -346,7 +345,7 @@ class DonggleBot(commands.Bot):
             }
             
             old_recruitments = await party_cog.db["recruitments"].find(query).to_list(None)
-            logger.info(f"삭제할 오래된 스레드 {len(old_recruitments)}개 발견")
+            #logger.info(f"삭제할 오래된 스레드 {len(old_recruitments)}개 발견")
             
             delete_count = 0
             for recruitment in old_recruitments:
@@ -361,7 +360,7 @@ class DonggleBot(commands.Bot):
                     # 길드 찾기
                     guild = self.get_guild(int(guild_id))
                     if not guild:
-                        logger.warning(f"서버를 찾을 수 없음: {guild_id}")
+                        #logger.warning(f"서버를 찾을 수 없음: {guild_id}")
                         continue
                     
                     # 스레드 찾기 및 삭제
@@ -370,10 +369,10 @@ class DonggleBot(commands.Bot):
                         thread = guild.get_thread(int(thread_id))
                         if thread:
                             await thread.delete()
-                            logger.info(f"오래된 스레드 {thread_id} 삭제 완료")
+                            # logger.info(f"오래된 스레드 {thread_id} 삭제 완료")
                             deleted_thread = True
                     except discord.NotFound:
-                        logger.info(f"스레드 {thread_id}가 이미 삭제되어 있습니다.")
+                        #logger.info(f"스레드 {thread_id}가 이미 삭제되어 있습니다.")
                         deleted_thread = True
                     except Exception as thread_error:
                         logger.error(f"스레드 {thread_id} 삭제 중 오류: {thread_error}")
@@ -384,7 +383,7 @@ class DonggleBot(commands.Bot):
                             voice_channel = guild.get_channel(int(voice_channel_id))
                             if voice_channel:
                                 await voice_channel.delete(reason="오래된 스레드 정리에 의한 음성 채널 삭제")
-                                logger.info(f"음성 채널 {voice_channel_id} 삭제 완료")
+                                #logger.info(f"음성 채널 {voice_channel_id} 삭제 완료")
                         except Exception as voice_error:
                             logger.error(f"음성 채널 {voice_channel_id} 삭제 중 오류: {voice_error}")
                     
@@ -420,7 +419,7 @@ async def main():
         bot = DonggleBot()
         await bot.start(settings.DISCORD_TOKEN)
     except discord.LoginFailure:
-        logger.critical("봇 토큰이 올바르지 않습니다. real.env 파일을 확인하세요.")
+        logger.critical("봇 토큰이 올바르지 않습니다. 환경설정 파일을 확인하세요.")
     except Exception as e:
         logger.critical(f"봇 실행 중 심각한 오류 발생: {str(e)}")
         traceback.print_exc()

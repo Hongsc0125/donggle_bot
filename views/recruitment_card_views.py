@@ -3,6 +3,10 @@ from discord import ui, SelectOption, Interaction, TextStyle
 import asyncio
 import datetime
 from bson.objectid import ObjectId
+import logging
+
+# 로깅 설정
+logger = logging.getLogger('donggle_bot.recruitment_card')
 
 
 class RecruitmentModal(ui.Modal, title="모집 내용 작성"):
@@ -33,7 +37,7 @@ class RecruitmentModal(ui.Modal, title="모집 내용 작성"):
             
             
         except Exception as e:
-            print(f"[ERROR] 모집 내용 저장 중 오류 발생: {e}")
+            #logger.info(f"[ERROR] 모집 내용 저장 중 오류 발생: {e}")
             await interaction.response.send_message("모집 내용 저장 중 오류가 발생했습니다.", ephemeral=True)
 
 
@@ -236,7 +240,7 @@ class RecruitmentCard(discord.ui.View):
             # DB에서 모집 정보 가져오기
             recruitment = await self.db["recruitments"].find_one({"_id": ObjectId(self.recruitment_id)})
             if not recruitment:
-                print(f"[ERROR] 모집 ID {self.recruitment_id}에 해당하는 모집 정보를 찾을 수 없습니다.")
+                # #logger.info(f"[ERROR] 모집 ID {self.recruitment_id}에 해당하는 모집 정보를 찾을 수 없습니다.")
                 if not interaction.response.is_done():
                     await interaction.response.defer(ephemeral=True)
                 msg = await interaction.followup.send("모집 정보를 찾을 수 없습니다.", ephemeral=True)
@@ -310,22 +314,22 @@ class RecruitmentCard(discord.ui.View):
                         if not valid_diff and "difficulty" in dungeon_info:
                             valid_diff = dungeon_info["difficulty"]
                 except Exception as e:
-                    print(f"[WARNING] 던전 정보 조회 중 오류 발생: {e}")
+                    logger.warning(f"던전 정보 조회 중 오류 발생: {e}")
             
             # 스레드 이름 재설정 시도
             if valid_kind and valid_diff:
                 new_thread_name = f"{valid_kind} {valid_diff}"
                 try:
                     await thread.edit(name=new_thread_name)
-                    print(f"[INFO] 스레드 이름을 '{new_thread_name}'으로 변경했습니다.")
+                    #logger.info(f"[INFO] 스레드 이름을 '{new_thread_name}'으로 변경했습니다.")
                 except Exception as e:
-                    print(f"[WARNING] 스레드 이름 변경 중 오류 발생: {e}")
+                    logger.warning(f"스레드 이름 변경 중 오류 발생: {e}")
             elif valid_kind:
                 try:
                     await thread.edit(name=valid_kind)
-                    print(f"[INFO] 스레드 이름을 '{valid_kind}'으로 변경했습니다.")
+                    #logger.info(f"[INFO] 스레드 이름을 '{valid_kind}'으로 변경했습니다.")
                 except Exception as e:
-                    print(f"[WARNING] 스레드 이름 변경 중 오류 발생: {e}")
+                    logger.warning(f"스레드 이름 변경 중 오류 발생: {e}")
             
             # 스레드 설정용 뷰 생성
             archive_view = ThreadArchiveView(
@@ -349,9 +353,9 @@ class RecruitmentCard(discord.ui.View):
             await thread.send(f"<@{creator_id}> 스레드 보관 기간을 설정해주세요.", view=archive_view)
             
         except Exception as e:
-            print(f"스레드 생성 중 오류 발생: {e}")
+            #logger.info(f"스레드 생성 중 오류 발생: {e}")
             import traceback
-            print(f"상세 오류: {traceback.format_exc()}")
+            #logger.info(f"상세 오류: {traceback.format_exc()}")
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
             msg = await interaction.followup.send("스레드 생성 중 오류가 발생했습니다.", ephemeral=True)
@@ -407,7 +411,7 @@ class ThreadArchiveView(discord.ui.View):
             # DB에서 최신 모집 정보 가져오기
             recruitment = await self.db["recruitments"].find_one({"_id": ObjectId(self.recruitment_id)})
             if not recruitment:
-                print(f"[ERROR] 모집 ID {self.recruitment_id}에 해당하는 모집 정보를 찾을 수 없습니다.")
+                #logger.info(f"[ERROR] 모집 ID {self.recruitment_id}에 해당하는 모집 정보를 찾을 수 없습니다.")
                 await interaction.followup.send("모집 정보를 찾을 수 없습니다.", ephemeral=True)
                 return
                 
@@ -438,7 +442,7 @@ class ThreadArchiveView(discord.ui.View):
                 
                 # 이름 변경만 수행하고 보관은 하지 않음
                 await thread.edit(name=thread_name)
-                print(f"[INFO] 스레드 이름을 '{thread_name}'으로 변경했습니다.")
+                #logger.info(f"[INFO] 스레드 이름을 '{thread_name}'으로 변경했습니다.")
                 
                 # DB에 삭제 예정 시간 저장
                 await self.db["recruitments"].update_one(
@@ -456,7 +460,7 @@ class ThreadArchiveView(discord.ui.View):
                 self.schedule_thread_deletion(thread, self.recruitment_id, duration_minutes, interaction.guild.id)
                 
             except Exception as e:
-                print(f"[WARNING] 스레드 이름 변경 중 오류 발생: {e}")
+                #logger.info(f"[WARNING] 스레드 이름 변경 중 오류 발생: {e}")
                 # 이름 변경 실패 시 보관 기간만 설정
                 await thread.edit(auto_archive_duration=duration_minutes)
             
@@ -529,13 +533,13 @@ class ThreadArchiveView(discord.ui.View):
                     try:
                         participants.append(int(p_id))
                     except (ValueError, TypeError):
-                        print(f"[WARNING] 참가자 ID 변환 실패: {p_id}")
+                        logger.info(f"[WARNING] 참가자 ID 변환 실패: {p_id}")
                 
                 participants_text = f"총 {len(participants)}/{len(participants)}명 참가\n"
                 for i, p_id in enumerate(participants):
                     participants_text += f"{i+1}. <@{p_id}>\n"
             except Exception as e:
-                print(f"[WARNING] 참가자 목록 처리 중 오류 발생: {e}")
+                logger.info(f"[WARNING] 참가자 목록 처리 중 오류 발생: {e}")
                 participants_text = "참가자 정보를 불러올 수 없습니다."
                 participants = []
             
@@ -581,12 +585,12 @@ class ThreadArchiveView(discord.ui.View):
                 # 음성 채널 참여 버튼 추가
                 voice_view = VoiceChannelView(voice_channel_id)
                 voice_msg = await thread.send("🔊 **파티 음성 채널에 참여하세요!**", view=voice_view)
-                print(f"[DEBUG] 음성 채널 참여 버튼 생성 완료: 메시지 ID={voice_msg.id}")
+                #logger.info(f"[DEBUG] 음성 채널 참여 버튼 생성 완료: 메시지 ID={voice_msg.id}")
         
         except Exception as e:
-            print(f"[ERROR] 스레드 보관 기간 설정 중 오류 발생: {e}")
+            #logger.info(f"[ERROR] 스레드 보관 기간 설정 중 오류 발생: {e}")
             import traceback
-            print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
+            #logger.info(f"[ERROR] 상세 오류: {traceback.format_exc()}")
             await interaction.followup.send("스레드 보관 기간 설정 중 오류가 발생했습니다.", ephemeral=True)
 
     def schedule_thread_deletion(self, thread, recruitment_id, duration_minutes, guild_id):
@@ -601,7 +605,7 @@ class ThreadArchiveView(discord.ui.View):
                     # 스레드 정보 다시 가져오기
                     guild = self.bot.get_guild(guild_id)
                     if not guild:
-                        print(f"[ERROR] 스레드 삭제 실패: 서버를 찾을 수 없음 (ID: {guild_id})")
+                        #logger.info(f"[ERROR] 스레드 삭제 실패: 서버를 찾을 수 없음 (ID: {guild_id})")
                         return
                     
                     # 채널 ID로 스레드 찾기
@@ -615,13 +619,13 @@ class ThreadArchiveView(discord.ui.View):
                                 voice_channel = guild.get_channel(int(voice_channel_id))
                                 if voice_channel:
                                     await voice_channel.delete(reason="스레드 자동 삭제에 의한 음성 채널 삭제")
-                                    print(f"[INFO] 음성 채널 {voice_channel.id} 삭제 완료")
+                                    #logger.info(f"[INFO] 음성 채널 {voice_channel.id} 삭제 완료")
                         except Exception as voice_error:
-                            print(f"[ERROR] 음성 채널 삭제 중 오류: {voice_error}")
+                            logger.info(f"[ERROR] 음성 채널 삭제 중 오류: {voice_error}")
                         
                         # 스레드 삭제
                         await fetched_thread.delete()
-                        print(f"[INFO] 스레드 {thread.id} 자동 삭제 완료")
+                        # logger.info(f"[INFO] 스레드 {thread.id} 자동 삭제 완료")
                         
                         # 모집 정보 상태 업데이트
                         await self.db["recruitments"].update_one(
@@ -632,19 +636,19 @@ class ThreadArchiveView(discord.ui.View):
                             }}
                         )
                     else:
-                        print(f"[INFO] 스레드 {thread.id}가 이미 삭제되었습니다.")
+                        logger.info(f"[INFO] 스레드 {thread.id}가 이미 삭제되었습니다.")
                 except discord.NotFound:
-                    print(f"[INFO] 스레드 {thread.id}가 이미 삭제되었습니다.")
+                    logger.info(f"[INFO] 스레드 {thread.id}가 이미 삭제되었습니다.")
                 except Exception as thread_error:
-                    print(f"[ERROR] 스레드 삭제 확인 중 오류: {thread_error}")
-                    print(traceback.format_exc())
+                    logger.info(f"[ERROR] 스레드 삭제 확인 중 오류: {thread_error}")
+                    logger.info(traceback.format_exc())
             except Exception as e:
-                print(f"[ERROR] 스레드 자동 삭제 작업 중 오류 발생: {e}")
-                print(traceback.format_exc())
+                logger.info(f"[ERROR] 스레드 자동 삭제 작업 중 오류 발생: {e}")
+                logger.info(traceback.format_exc())
         
         # 비동기 작업 시작
         asyncio.create_task(delete_thread_later())
-        print(f"[INFO] 스레드 {thread.id}가 {duration_minutes}분 후 삭제되도록 예약되었습니다.")
+        #logger.info(f"[INFO] 스레드 {thread.id}가 {duration_minutes}분 후 삭제되도록 예약되었습니다.")
 
     async def force_cleanup_channel(self, guild_id, channel_id):
         """특정 채널의 완료된 모집 메시지를 강제로 삭제합니다."""
@@ -652,13 +656,13 @@ class ThreadArchiveView(discord.ui.View):
             # 서버 객체 가져오기
             guild = self.bot.get_guild(int(guild_id))
             if not guild:
-                logger.warning(f"서버를 찾을 수 없음: {guild_id}")
+                #logger.warning(f"서버를 찾을 수 없음: {guild_id}")
                 return
             
             # 채널 객체 가져오기
             channel = guild.get_channel(int(channel_id))
             if not channel:
-                logger.warning(f"서버 {guild_id}의 공고 채널을 찾을 수 없음: {channel_id}")
+                #logger.warning(f"서버 {guild_id}의 공고 채널을 찾을 수 없음: {channel_id}")
                 return
             
             # 서버별 모집 정보 조회 (완료/취소 상태만)
@@ -668,10 +672,10 @@ class ThreadArchiveView(discord.ui.View):
             }).to_list(None)
             
             if not completed_recruitments:
-                logger.info(f"서버 {guild_id}에 완료/취소된 모집이 없습니다.")
+                #logger.info(f"서버 {guild_id}에 완료/취소된 모집이 없습니다.")
                 return
             
-            logger.info(f"서버 {guild_id}에서 {len(completed_recruitments)}개의 완료/취소된 모집을 찾았습니다.")
+            #logger.info(f"서버 {guild_id}에서 {len(completed_recruitments)}개의 완료/취소된 모집을 찾았습니다.")
             
             # 1. 먼저 메시지 ID가 있는 완료 모집 처리 (더 효율적)
             message_id_map = {}
@@ -690,10 +694,10 @@ class ThreadArchiveView(discord.ui.View):
             deleted_count = 0
             for message_id, recruitment_id in message_id_map.items():
                 try:
-                    logger.info(f"메시지 ID로 삭제 시도: {message_id}, 모집 ID: {recruitment_id}")
+                    #logger.info(f"메시지 ID로 삭제 시도: {message_id}, 모집 ID: {recruitment_id}")
                     message = await channel.fetch_message(int(message_id))
                     await message.delete()
-                    logger.info(f"서버 {guild_id}의 완료된 모집 ID {recruitment_id} 메시지가 성공적으로 삭제됨 (메시지 ID 매칭)")
+                    #logger.info(f"서버 {guild_id}의 완료된 모집 ID {recruitment_id} 메시지가 성공적으로 삭제됨 (메시지 ID 매칭)")
                     deleted_count += 1
                 except discord.NotFound:
                     logger.info(f"서버 {guild_id}의 모집 ID {recruitment_id}의 메시지를 찾을 수 없음: {message_id}")
@@ -705,7 +709,7 @@ class ThreadArchiveView(discord.ui.View):
             async for message in channel.history(limit=100):
                 messages_to_check.append(message)
             
-            logger.info(f"서버 {guild_id}의 공고 채널에서 {len(messages_to_check)}개의 메시지를 확인합니다.")
+            #logger.info(f"서버 {guild_id}의 공고 채널에서 {len(messages_to_check)}개의 메시지를 확인합니다.")
             
             for message in messages_to_check:
                 try:
@@ -733,29 +737,29 @@ class ThreadArchiveView(discord.ui.View):
                             id_match = re.search(r"모집 ID:\s*([a-f0-9]{24})", footer_text)
                             if id_match:
                                 recruitment_id = id_match.group(1).strip()
-                                logger.info(f"푸터에서 모집 ID를 추출했습니다: {recruitment_id}")
+                                #logger.info(f"푸터에서 모집 ID를 추출했습니다: {recruitment_id}")
                     
                     # 임베드의 필드에서 모집 ID 찾기 (이전 방식 호환)
                     if not recruitment_id:
                         for field in embed.fields:
                             if (field.name == "모집 ID"):
                                 recruitment_id = field.value.strip()
-                                logger.info(f"필드에서 모집 ID를 추출했습니다: {recruitment_id}")
+                                #logger.info(f"필드에서 모집 ID를 추출했습니다: {recruitment_id}")
                                 break
                     
                     if recruitment_id and recruitment_id in completed_recruitment_ids:
-                        logger.info(f"서버 {guild_id}의 완료된 모집 ID {recruitment_id} 메시지 삭제 시도 (내용 매칭)")
+                        #logger.info(f"서버 {guild_id}의 완료된 모집 ID {recruitment_id} 메시지 삭제 시도 (내용 매칭)")
                         try:
                             await message.delete()
                             deleted_count += 1
-                            logger.info(f"서버 {guild_id}의 완료된 모집 ID {recruitment_id} 메시지가 성공적으로 삭제됨 (내용 매칭)")
+                            #logger.info(f"서버 {guild_id}의 완료된 모집 ID {recruitment_id} 메시지가 성공적으로 삭제됨 (내용 매칭)")
                         except Exception as delete_error:
                             logger.error(f"메시지 삭제 중 오류: {delete_error}")
                 except Exception as e:
                     logger.error(f"메시지 처리 중 오류 발생: {e}")
                     continue
             
-            logger.info(f"서버 {guild_id}의 강제 채널 정리 완료: {deleted_count}개의 메시지가 삭제되었습니다.")
+            #logger.info(f"서버 {guild_id}의 강제 채널 정리 완료: {deleted_count}개의 메시지가 삭제되었습니다.")
             
         except Exception as e:
             logger.error(f"강제 채널 정리 중 오류 발생: {e}")
@@ -795,13 +799,13 @@ class VoiceChannelJoinButton(discord.ui.Button):
                     await interaction.response.send_message("서버에서 사용자를 찾을 수 없습니다.", ephemeral=True)
                     return
                 except Exception as e:
-                    print(f"[ERROR] 사용자 정보 조회 중 오류 발생: {e}")
+                    #logger.info(f"[ERROR] 사용자 정보 조회 중 오류 발생: {e}")
                     await interaction.response.send_message("사용자 정보를 확인하는 중 오류가 발생했습니다.", ephemeral=True)
                     return
             
             # voice 속성이 있는지 확인 (더 안전한 방어 코드 추가)
             if not hasattr(member, 'voice'):
-                print(f"[WARNING] 멤버 객체에 voice 속성이 없습니다. 멤버 ID: {member.id}, 타입: {type(member)}")
+                #logger.info(f"[WARNING] 멤버 객체에 voice 속성이 없습니다. 멤버 ID: {member.id}, 타입: {type(member)}")
                 await interaction.response.send_message(
                     f"음성 채널 상태를 확인할 수 없습니다. 직접 {voice_channel.mention} 채널에 접속해주세요.",
                     ephemeral=True
@@ -851,7 +855,7 @@ class VoiceChannelJoinButton(discord.ui.Button):
                             ephemeral=True
                         )
                 except Exception as e:
-                    print(f"[ERROR] 사용자 음성 채널 이동 중 오류: {e}")
+                    #logger.info(f"[ERROR] 사용자 음성 채널 이동 중 오류: {e}")
                     await interaction.response.send_message(
                         f"음성 채널로 이동할 수 없습니다. 직접 {voice_channel.mention} 채널에 접속해주세요.", 
                         ephemeral=True
@@ -883,9 +887,9 @@ class VoiceChannelJoinButton(discord.ui.Button):
                 )
                 
         except Exception as e:
-            print(f"[ERROR] 음성 채널 참여 중 오류 발생: {e}")
+            #logger.info(f"[ERROR] 음성 채널 참여 중 오류 발생: {e}")
             import traceback
-            print(f"[ERROR] 상세 오류: {traceback.format_exc()}")
+            #logger.info(f"[ERROR] 상세 오류: {traceback.format_exc()}")
             await interaction.response.send_message("음성 채널 참여 중 오류가 발생했습니다.", ephemeral=True)
 
 # 임시 음성 채널 관리 뷰
