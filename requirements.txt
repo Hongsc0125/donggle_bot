@@ -1,3 +1,4 @@
 pytz
 pydantic_settings
 discord
+psycopg2-binary
