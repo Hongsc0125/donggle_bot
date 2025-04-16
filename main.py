@@ -29,6 +29,7 @@ class Donggle(commands.Bot):
             "application_id": settings.APPLICATION_ID,
         }
         super().__init__(**kwargs)
+        self.check_channel_status.start()  # 루프 시작
 
     async def setup_hook(self):
         extensions = [
@@ -60,6 +61,12 @@ class Donggle(commands.Bot):
 
         except Exception as e:
             logger.error(f"명령어 트리 동기화 중 오류 발생: {e}")
+
+    @tasks.loop(minutes=10)
+    async def check_channel_status(self):
+        recruitment_cog = self.get_cog("RecruitmentCog")
+        if recruitment_cog:
+            await recruitment_cog.on_ready()
 
 
 async def main():
