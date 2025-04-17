@@ -1,6 +1,6 @@
 from sqlalchemy import text
 
-
+# 등록채널조회
 SELECT_RECRUITMENT_CHANNEL = text("""
     SELECT regist_ch_id
     FROM pair_channels
@@ -9,7 +9,7 @@ def select_recruitment_channel(db):
     return db.execute(SELECT_RECRUITMENT_CHANNEL, {
     }).fetchall()
 
-
+# 던전리스트 조회
 SELECT_DUNGEON = text("""
     select
     (select discript from com_code where value=dungeon_type_code and column_name ='dungeon_type_code') as dungeon_type
@@ -21,7 +21,7 @@ def select_dungeon(db):
     return db.execute(SELECT_DUNGEON, {
     }).fetchall()
 
-
+# 던전ID 조회
 SELECT_DUNGEON_ID = text("""
     select dungeon_id
     from dungeons
@@ -37,6 +37,7 @@ def select_dungeon_id(db, dungeon_type_code, dungeon_name_code, dungeon_difficul
     }).fetchone()
     return row[0] if row else None
 
+# 페어아이디 조회
 SELECT_PAIR_CHANNEL_ID = text("""
     SELECT pair_id
     FROM pair_channels
@@ -50,6 +51,7 @@ def select_pair_channel_id(db, guild_id, regist_ch_id):
     }).fetchone()
     return row[0] if row else None
     
+# 모집등록
 INSERT_RECRUITMENT = text("""
     INSERT INTO recruitments (
         dungeon_id
@@ -78,6 +80,7 @@ def insert_recruitment(db, dungeon_id, pair_id, create_user_id, recru_discript, 
     }).fetchone()
     return row[0] if row else None
 
+# 모집상태값 공통코드에서 조회
 SELECT_COM_CODE_STATUS = text("""
     SELECT discript
     FROM com_code

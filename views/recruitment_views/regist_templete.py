@@ -319,6 +319,14 @@ class ConfirmationView(discord.ui.View):
                 , 2
             )
 
+            if(not recru_id):
+                await interaction.response.send_message(
+                    "❌ 모집 등록 실패. 운영자에게 문의해주세요.", ephemeral=True
+                )
+                return
+            else:
+                db.commit()
+                db.close()
 
             await interaction.response.send_message(
                 "✅ 모집이 성공적으로 등록되었습니다!", ephemeral=True
