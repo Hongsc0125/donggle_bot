@@ -25,15 +25,15 @@ def select_dungeon(db):
 SELECT_DUNGEON_ID = text("""
     select dungeon_id
     from dungeons
-    where dungeon_type_code = (SELECT value from com_code where discript=:dungeon_type_code and column_name ='dungeon_type_code')
-    and dungeon_name_code = (SELECT value from com_code where discript=:dungeon_name_code and column_name ='dungeon_name_code')
-    and dungeon_difficulty_code = (SELECT value from com_code where discript=:dungeon_difficulty_code and column_name ='dungeon_difficulty_code')
+    where dungeon_type_code = (SELECT value from com_code where discript=:dungeon_type and column_name ='dungeon_type_code')
+    and dungeon_name_code = (SELECT value from com_code where discript=:dungeon_name and column_name ='dungeon_name_code')
+    and dungeon_difficulty_code = (SELECT value from com_code where discript=:dungeon_difficulty and column_name ='dungeon_difficulty_code')
 """)
-def select_dungeon_id(db, dungeon_type_code, dungeon_name_code, dungeon_difficulty_code):
+def select_dungeon_id(db, dungeon_type, dungeon_name, dungeon_difficulty):
     row = db.execute(SELECT_DUNGEON_ID, {
-        'dungeon_type_code': dungeon_type_code,
-        'dungeon_name_code': dungeon_name_code,
-        'dungeon_difficulty_code': dungeon_difficulty_code
+        'dungeon_type': dungeon_type,
+        'dungeon_name': dungeon_name,
+        'dungeon_difficulty': dungeon_difficulty
     }).fetchone()
     return row[0] if row else None
 
@@ -80,6 +80,7 @@ def insert_recruitment(db, dungeon_id, pair_id, create_user_id, recru_discript, 
     }).fetchone()
     return row[0] if row else None
 
+
 # 모집상태값 공통코드에서 조회
 SELECT_COM_CODE_STATUS = text("""
     SELECT discript
@@ -92,3 +93,41 @@ def select_com_code_status(db, status):
         'status': status
     }).fetchone()
     return row[0] if row else None
+
+
+# 등록한 공고 조회
+SELECT_RECRUITMENT = text("""
+    SELECT
+        (select discript from com_code where value=C.dungeon_type_code and column_name ='dungeon_type_code') as dungeon_type
+        , (select discript from com_code where value=C.dungeon_name_code and column_name ='dungeon_name_code') as dungeon_name
+        , (select discript from com_code where value=C.dungeon_difficulty_code and column_name ='dungeon_difficulty_code') as dungeon_difficulty
+        , (select discript from com_code where value=A.status_code and column_name ='status_code') as status
+        , A.recru_discript
+        , A.max_person
+        , A.create_user_id
+        , A.recru_id
+        , B.list_ch_id
+    FROM recruitments A
+    JOIN pair_channels B
+    ON A.pair_id = B.pair_id
+    JOIN dungeons C
+    ON A.dungeon_id = C.dungeon_id
+    WHERE 1=1
+    AND recru_id = :recru_id
+""")
+def select_recruitment(db, recru_id):
+    row = db.execute(SELECT_RECRUITMENT, {
+        'recru_id': str(recru_id)
+    }).fetchone()
+    # SQLAlchemy Row를 딕셔너리로 변환
+    return {
+        'dungeon_type': row[0],
+        'dungeon_name': row[1],
+        'dungeon_difficulty': row[2],
+        'status': row[3],
+        'recru_discript': row[4],
+        'max_person': row[5],
+        'create_user_id': row[6],
+        'recru_id': row[7],
+        'list_ch_id': row[8]
+    }

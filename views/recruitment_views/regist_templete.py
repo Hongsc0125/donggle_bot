@@ -3,7 +3,8 @@ from typing import List, Tuple
 
 import discord
 from db.session import SessionLocal
-from queries.recruitment_query import select_dungeon, select_pair_channel_id, select_dungeon_id, insert_recruitment
+from queries.recruitment_query import select_dungeon, select_pair_channel_id, select_dungeon_id, insert_recruitment, select_recruitment
+from views.recruitment_views.list_templete import build_recruitment_embed
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +193,7 @@ class RecruitmentFormView(discord.ui.View):
             view=MemberCountView(self),
         )
     
-    # ───── 취소소
+    # ───── 취소
     async def cancel_recruitment(self, interaction: discord.Interaction):
         """모집 과정을 취소하고 에페메럴 안내 후 마스터 메시지 삭제."""
         await interaction.response.send_message(
@@ -291,7 +292,6 @@ class ConfirmationView(discord.ui.View):
     @discord.ui.button(label="모집등록", style=discord.ButtonStyle.success)
     async def confirm(self, interaction: discord.Interaction, _):
         try:
-            # TODO: DB 저장 및 공개 채널 전송
             db = SessionLocal()
             # 모집 정보 저장
             pair_id = select_pair_channel_id(
@@ -325,20 +325,67 @@ class ConfirmationView(discord.ui.View):
                 )
                 return
             else:
-                db.commit()
-                db.close()
+                logger.info(f"모집 등록 성공: {recru_id}")
+            
+
+            # 가져온다 DB에 저장한 등록정보를!
+            regist_data = select_recruitment(db, recru_id)
+
+            if regist_data is None:
+                await interaction.response.send_message(
+                    "❌ 모집 정보를 불러오지 못했습니다.", ephemeral=True
+                )
+                db.rollback()
+                return
+
+            if regist_data['dungeon_type'] == '레이드' or regist_data['dungeon_type'] == '심층' or regist_data['dungeon_type'] == '퀘스트':
+                image_url = f"https://harmari.duckdns.org/static/{regist_data['dungeon_type']}.png"
+            elif regist_data['dungeon_type'] == '어비스':
+                image_url = f"https://harmari.duckdns.org/static/{regist_data['dungeon_name']}.png"
+            else:
+                image_url = f"https://harmari.duckdns.org/static/마비로고.png"
+
+
+            channel = interaction.guild.get_channel(int(regist_data['list_ch_id']))
+            if channel is None:
+                await interaction.response.send_message(
+                    "❌ 모집 등록 실패(채널가져오기 실패). 운영자에게 문의해주세요.", ephemeral=True
+                )
+                db.rollback()
+                return
+
+            # 공고 등록
+            embed = build_recruitment_embed(
+                dungeon_type = regist_data['dungeon_type'],
+                dungeon_name = regist_data['dungeon_name'],
+                difficulty = regist_data['dungeon_difficulty'],
+                detail = regist_data['recru_discript'],
+                status = regist_data['status'],
+                max_person = regist_data['max_person'],
+                recruiter = regist_data['create_user_id'],
+                applicants=[],
+                image_url=image_url,
+                recru_id=recru_id
+            )
+            await channel.send(embed=embed)
+
+
 
             await interaction.response.send_message(
                 "✅ 모집이 성공적으로 등록되었습니다!", ephemeral=True
             )
+
+            db.commit()
 
         except Exception:
             logger.exception("모집 등록 실패")
             await interaction.response.send_message(
                 "❌ 모집 등록 중 오류가 발생했습니다.", ephemeral=True
             )
+            db.rollback()
         finally:
             await self.root_msg.delete()
+            db.close()
 
     @discord.ui.button(label="취소", style=discord.ButtonStyle.danger)
     async def cancel(self, interaction: discord.Interaction, _):

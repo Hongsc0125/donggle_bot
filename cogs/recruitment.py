@@ -6,7 +6,7 @@ import logging
 from db.session import SessionLocal
 from queries.recruitment_query import select_recruitment_channel
 from views.recruitment_views.regist_templete import RecruitmentButtonView
-from views.recruitment_views.list_templete import build_recruitment_embed
+
 
 logger = logging.getLogger(__name__)
 
@@ -72,21 +72,6 @@ class RecruitmentCog(commands.Cog):
                         )
                     except Exception as e:
                         logger.warning(f"등록 채널 {channel_id}에 버튼 메시지 전송 실패: {str(e)}")
-
-        #TEST 공고리스트 보내기
-        embed = build_recruitment_embed(
-            dungeon_type="어비스",
-            dungeon_name="파멸의전당",
-            difficulty="매우어려움",
-            status="2",
-            detail="탱 1 / 딜 2 구해요! 21시 출발",
-            max_person=4,
-            recruiter="interaction.user",
-            applicants=[],
-            image_url="https://harmari.duckdns.org/static/파멸의전당.png",
-            recru_id="RCU-00017"
-        )
-        await channel.send(embed=embed)
 
 
 # Cog를 등록하는 설정 함수

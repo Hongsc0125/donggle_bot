@@ -3,3 +3,4 @@ pydantic_settings
 discord
 psycopg2-binary
 PyNaCl
+sqlalchemy

@@ -2,7 +2,7 @@ import discord
 from db.session import SessionLocal
 from queries.recruitment_query import select_com_code_status
 
-SEPARATOR = "─" * 30     # 원하는 길이·문자 조정
+SEPARATOR = "─" * 20     # 원하는 길이·문자 조정
 db = SessionLocal()
 
 def build_recruitment_embed(
@@ -17,12 +17,6 @@ def build_recruitment_embed(
     image_url: str,
     recru_id: str,
 ) -> discord.Embed:
-    
-    status = select_com_code_status(db, status)
-    if status:
-        status = f"**{status}**"
-    else:
-        status = "❓**알수없음**"
 
     embed = discord.Embed(
         title=f"⚔️ {detail}",
@@ -35,7 +29,7 @@ def build_recruitment_embed(
     embed.add_field(
         name=f"",
         value=f"- **모집인원** : `{len(applicants)}` / `{max_person}`\n"
-                +f"{status}",
+                +f"**{status}**",
         inline=False
     )
 
