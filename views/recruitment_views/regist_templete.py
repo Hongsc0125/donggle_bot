@@ -382,7 +382,7 @@ class ConfirmationView(discord.ui.View):
             # 등록한 모집정보에 메시지 ID 저장
             result = update_recruitment_message_id(db, message_id, recru_id)
 
-            logger.info(f"{result} ::::: 모집 등록 성공: {recru_id} / 메시지 ID: {message_id}")
+            logger.info(f"모집 등록 {result} : {recru_id} / 메시지 ID: {message_id}")
 
             if not result:
                 await interaction.response.send_message(

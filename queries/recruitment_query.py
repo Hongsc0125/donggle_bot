@@ -120,6 +120,7 @@ SELECT_RECRUITMENT = text("""
         , A.create_user_id
         , A.recru_id
         , B.list_ch_id
+        , A.list_message_id
     FROM recruitments A
     JOIN pair_channels B
     ON A.pair_id = B.pair_id
@@ -142,7 +143,8 @@ def select_recruitment(db, recru_id):
         'max_person': row[5],
         'create_user_id': row[6],
         'recru_id': row[7],
-        'list_ch_id': row[8]
+        'list_ch_id': row[8],
+        'list_message_id': row[9]
     }
 
 
@@ -157,5 +159,16 @@ def update_recruitment_message_id(db, message_id, recru_id):
         'message_id': str(message_id),
         'recru_id': str(recru_id)
     })
-    print("row::::::::::::::::::::::::::::", row)
     return row.rowcount > 0
+
+# 해당 모집의 참가자들 반환 List[str]
+SELECT_PARTICIPANTS = text("""
+    SELECT user_id
+    FROM participants
+    WHERE recru_id = :recru_id
+""")
+def select_participants(db, recru_id):
+    rows = db.execute(SELECT_PARTICIPANTS, {
+        'recru_id': str(recru_id)
+    }).fetchall()
+    return [row[0] for row in rows] 
