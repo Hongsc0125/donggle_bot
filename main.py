@@ -62,7 +62,7 @@ class Donggle(commands.Bot):
         except Exception as e:
             logger.error(f"명령어 트리 동기화 중 오류 발생: {e}")
 
-    @tasks.loop(minutes=10)
+    @tasks.loop(minutes=5)
     async def check_channel_status(self):
         recruitment_cog = self.get_cog("RecruitmentCog")
         if recruitment_cog:

@@ -21,6 +21,19 @@ def select_dungeon(db):
     return db.execute(SELECT_DUNGEON, {
     }).fetchall()
 
+# 최대 인원 설정값 조회
+SELECT_MAX_PERSON_SETTING = text("""
+    SELECT value
+    FROM com_code
+    WHERE column_name = 'max_person_setting_code'
+""")
+def select_max_person_setting(db):
+    row = db.execute(SELECT_MAX_PERSON_SETTING, {
+    }).fetchone()
+    return row[0] if row else None
+
+
+
 # 던전ID 조회
 SELECT_DUNGEON_ID = text("""
     select dungeon_id
@@ -131,3 +144,18 @@ def select_recruitment(db, recru_id):
         'recru_id': row[7],
         'list_ch_id': row[8]
     }
+
+
+# 메시지ID 저장
+UPDATE_RECRUITMENT_MESSAGE_ID = text("""
+    UPDATE recruitments
+    SET list_message_id = :message_id
+    WHERE recru_id = :recru_id
+""")
+def update_recruitment_message_id(db, message_id, recru_id):
+    row = db.execute(UPDATE_RECRUITMENT_MESSAGE_ID, {
+        'message_id': str(message_id),
+        'recru_id': str(recru_id)
+    })
+    print("row::::::::::::::::::::::::::::", row)
+    return row.rowcount > 0

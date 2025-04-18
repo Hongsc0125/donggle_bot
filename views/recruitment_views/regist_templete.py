@@ -4,7 +4,9 @@ from typing import List, Tuple
 import discord
 from db.session import SessionLocal
 from queries.recruitment_query import select_dungeon, select_pair_channel_id, select_dungeon_id, insert_recruitment, select_recruitment
-from views.recruitment_views.list_templete import build_recruitment_embed
+from queries.recruitment_query import update_recruitment_message_id, select_max_person_setting
+
+from views.recruitment_views.list_templete import build_recruitment_embed, RecruitmentListButtonView
 
 logger = logging.getLogger(__name__)
 
@@ -17,11 +19,11 @@ def _start_embed() -> discord.Embed:
     return discord.Embed(
         title="파티 모집 양식",
         description="던전 정보를 순서대로 선택해 주세요.",
-        color=discord.Color.blue(),
+        color=discord.Color.from_rgb(178, 96, 255),
     )
 
 def _update_embed(**fields) -> discord.Embed:
-    embed = discord.Embed(title="파티 모집 양식", color=discord.Color.blue())
+    embed = discord.Embed(title="", color=discord.Color.from_rgb(178, 96, 255))
     for k, v in fields.items():
         if v:
             embed.add_field(name=k, value=v, inline=False)
@@ -51,9 +53,10 @@ class RecruitmentButtonView(discord.ui.View):
                               _: discord.ui.Button):
         db = SessionLocal()
         rows: List[DungeonRow] = select_dungeon(db)
+        max_person_settings = select_max_person_setting(db)
         db.close()
 
-        form_view = RecruitmentFormView(rows)
+        form_view = RecruitmentFormView(rows, max_person_settings)
         await interaction.response.send_message(
             embed=_start_embed(), view=form_view, ephemeral=True
         )
@@ -63,11 +66,11 @@ class RecruitmentButtonView(discord.ui.View):
 # 1차 뷰 : 타입→이름→난이도
 # ──────────────────────────────
 class RecruitmentFormView(discord.ui.View):
-    def __init__(self, rows: List[DungeonRow]):
+    def __init__(self, rows: List[DungeonRow], max_person_settings=None):
         super().__init__(timeout=180)
         self.rows = rows
         self.root_msg: discord.WebhookMessage | None = None
-
+        self.max_person_settings = max_person_settings
         self.type = self.name = self.diff = None
 
         # 타입 Select (시작부터 표시)
@@ -132,7 +135,7 @@ class RecruitmentFormView(discord.ui.View):
 
         await self.refresh_view()
 
-    # ───── 이름 선택
+    # ───── 던전 이름 선택
     async def on_name(self, interaction: discord.Interaction):
         await interaction.response.defer()
 
@@ -190,7 +193,7 @@ class RecruitmentFormView(discord.ui.View):
                     "모집 인원": "선택 대기…",
                 }
             ),
-            view=MemberCountView(self),
+            view=MemberCountView(self, self.max_person_settings),
         )
     
     # ───── 취소
@@ -221,21 +224,27 @@ class RecruitmentFormView(discord.ui.View):
 # 2차 뷰 : 모집 인원
 # ──────────────────────────────
 class MemberCountView(discord.ui.View):
-    def __init__(self, form_view: RecruitmentFormView):
+    def __init__(self, form_view: RecruitmentFormView, max_person_settings=None):
         super().__init__(timeout=180)
         self.form_view = form_view
 
         select = discord.ui.Select(
             placeholder="모집 인원(본인 포함)",
-            options=[discord.SelectOption(label=f"{i}명", value=str(i))
-                     for i in range(2, 9)],
+            options=[discord.SelectOption(label=f"{i}명(본인포함)", value=str(i))
+                     for i in range(2, max_person_settings+1)],
             row=0,
         )
+        # '취소' 버튼
+        self.cancel_btn = discord.ui.Button(
+            label="취소", style=discord.ButtonStyle.danger,
+            disabled=False, row=3
+        )
         select.callback = self.on_member_selected
+        self.cancel_btn.callback = self.form_view.cancel_recruitment
         self.add_item(select)
+        self.add_item(self.cancel_btn)
 
     async def on_member_selected(self, interaction: discord.Interaction):
-        # await interaction.response.defer()
         count = interaction.data["values"][0]
         self.form_view.member_count = count
         await interaction.response.send_modal(
@@ -250,7 +259,7 @@ class DetailModal(discord.ui.Modal, title="모집 상세 정보"):
         label="모집 상세내용",
         style=discord.TextStyle.paragraph,
         required=False,
-        max_length=500,
+        max_length=30,
         placeholder="추가 설명이나 요구사항 등을 입력하세요",
     )
 
@@ -272,7 +281,7 @@ class DetailModal(discord.ui.Modal, title="모집 상세 정보"):
         confirm_embed = discord.Embed(
             title="모집 정보 확인",
             description="\n".join(f"**{k}:** {v}" for k, v in data.items()),
-            color=discord.Color.blue(),
+            color=discord.Color.from_rgb(178, 96, 255),
         )
         await self.form.root_msg.edit(
             embed=confirm_embed,
@@ -367,9 +376,21 @@ class ConfirmationView(discord.ui.View):
                 image_url=image_url,
                 recru_id=recru_id
             )
-            await channel.send(embed=embed)
+            msg = await channel.send(embed=embed, view=RecruitmentListButtonView())
+            message_id = msg.id
 
+            # 등록한 모집정보에 메시지 ID 저장
+            result = update_recruitment_message_id(db, message_id, recru_id)
 
+            logger.info(f"{result} ::::: 모집 등록 성공: {recru_id} / 메시지 ID: {message_id}")
+
+            if not result:
+                await interaction.response.send_message(
+                    "❌ 모집 등록 실패(메시지 ID 저장 실패). 운영자에게 문의해주세요.", ephemeral=True
+                )
+                db.rollback()
+                await msg.delete()
+                return
 
             await interaction.response.send_message(
                 "✅ 모집이 성공적으로 등록되었습니다!", ephemeral=True
