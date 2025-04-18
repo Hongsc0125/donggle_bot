@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────
 # 헬퍼
 # ──────────────────────────────
-DungeonRow = Tuple[str, str, str]          # (type, name, difficulty)
+DungeonRow = Tuple[str, str, str]
 
 def _start_embed() -> discord.Embed:
     return discord.Embed(
@@ -104,7 +104,7 @@ class RecruitmentFormView(discord.ui.View):
 
     # ───── 타입 선택
     async def on_type(self, interaction: discord.Interaction):
-        await interaction.response.defer()          # ACK
+        await interaction.response.defer()
 
         self.type = self.type_select.values[0]
 
@@ -229,9 +229,9 @@ class MemberCountView(discord.ui.View):
         self.form_view = form_view
 
         select = discord.ui.Select(
-            placeholder="모집 인원(본인 포함)",
-            options=[discord.SelectOption(label=f"{i}명(본인포함)", value=str(i))
-                     for i in range(2, max_person_settings+1)],
+            placeholder="모집 인원(본인 제외)",
+            options=[discord.SelectOption(label=f"{i}명(본인제외)", value=str(i))
+                     for i in range(1, max_person_settings)],
             row=0,
         )
         # '취소' 버튼
@@ -325,7 +325,7 @@ class ConfirmationView(discord.ui.View):
                 , interaction.user.id
                 , self.data["상세 내용"]
                 , int(self.data["모집 인원"])
-                , 2
+                , 2 # 모집중
             )
 
             if(not recru_id):
@@ -362,6 +362,8 @@ class ConfirmationView(discord.ui.View):
                 )
                 db.rollback()
                 return
+            
+            db.commit()
 
             # 공고 등록
             embed = build_recruitment_embed(
@@ -374,9 +376,10 @@ class ConfirmationView(discord.ui.View):
                 recruiter = regist_data['create_user_id'],
                 applicants=[],
                 image_url=image_url,
-                recru_id=recru_id
+                recru_id=recru_id,
+                create_dt=regist_data['create_dt']
             )
-            msg = await channel.send(embed=embed, view=RecruitmentListButtonView())
+            msg = await channel.send(embed=embed, view=RecruitmentListButtonView(recru_id=recru_id))
             message_id = msg.id
 
             # 등록한 모집정보에 메시지 ID 저장
@@ -395,7 +398,7 @@ class ConfirmationView(discord.ui.View):
             await interaction.response.send_message(
                 "✅ 모집이 성공적으로 등록되었습니다!", ephemeral=True
             )
-
+            
             db.commit()
 
         except Exception:

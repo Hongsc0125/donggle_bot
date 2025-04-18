@@ -121,6 +121,8 @@ SELECT_RECRUITMENT = text("""
         , A.recru_id
         , B.list_ch_id
         , A.list_message_id
+        , A.create_dt
+        , A.status_code
     FROM recruitments A
     JOIN pair_channels B
     ON A.pair_id = B.pair_id
@@ -144,7 +146,9 @@ def select_recruitment(db, recru_id):
         'create_user_id': row[6],
         'recru_id': row[7],
         'list_ch_id': row[8],
-        'list_message_id': row[9]
+        'list_message_id': row[9],
+        'create_dt': row[10],
+        'status_code': row[11]
     }
 
 
@@ -152,6 +156,7 @@ def select_recruitment(db, recru_id):
 UPDATE_RECRUITMENT_MESSAGE_ID = text("""
     UPDATE recruitments
     SET list_message_id = :message_id
+    , update_dt = now()
     WHERE recru_id = :recru_id
 """)
 def update_recruitment_message_id(db, message_id, recru_id):
@@ -161,7 +166,7 @@ def update_recruitment_message_id(db, message_id, recru_id):
     })
     return row.rowcount > 0
 
-# 해당 모집의 참가자들 반환 List[str]
+# recru_id에 해당하는 모집의 참가자들 반환 List[str]
 SELECT_PARTICIPANTS = text("""
     SELECT user_id
     FROM participants
@@ -172,3 +177,35 @@ def select_participants(db, recru_id):
         'recru_id': str(recru_id)
     }).fetchall()
     return [row[0] for row in rows] 
+
+# 참가자 등록
+INSERT_PARTICIPANTS = text("""
+    INSERT INTO participants (
+        recru_id
+        , user_id
+        ) VALUES (
+        :recru_id
+        , :user_id
+        )
+""")
+def insert_participants(db, recru_id, user_id):
+    row = db.execute(INSERT_PARTICIPANTS, {
+        'recru_id': str(recru_id),
+        'user_id': str(user_id)
+    })
+    return row.rowcount > 0
+
+# 참가여부 조회
+SELECT_PARTICIPANTS_CHECK = text("""
+    SELECT count(*)
+    FROM participants
+    WHERE recru_id = :recru_id
+    AND user_id = :user_id
+    AND del_yn = 'N'
+""")
+def select_participants_check(db, recru_id, user_id):
+    row = db.execute(SELECT_PARTICIPANTS_CHECK, {
+        'recru_id': str(recru_id),
+        'user_id': str(user_id)
+    }).fetchone()
+    return row[0] > 0
