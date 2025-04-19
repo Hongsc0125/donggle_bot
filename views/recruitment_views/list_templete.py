@@ -265,7 +265,61 @@ class RecruitmentListButtonView(discord.ui.View):
     # ───────────────────────────────────────────────
     @discord.ui.button(label="모집취소", style=discord.ButtonStyle.danger, custom_id="cancel_recruit", row=1)
     async def cancel_recruit(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("모집이 취소되었습니다.", ephemeral=True)
+        db = SessionLocal()
+        try:
+            recru_id = interaction.message.embeds[0].footer.text
+
+            recruitment_result = select_recruitment(db, recru_id)
+            
+            if recruitment_result is None:
+                await interaction.response.send_message("❌ 모집이 존재하지 않습니다.", ephemeral=True)
+                return
+            
+            if recruitment_result["status_code"] != 2:
+                await interaction.response.send_message("❌ 모집이 마감 또는 취소되었습니다.", ephemeral=True)
+                return
+
+            # 모집마감 상태값 업데이트(4: 모집취소)
+            update_result = update_recruitment_status(db, 4, recru_id=recru_id)
+                
+            if not update_result:
+                await interaction.response.send_message("❌ 모집취소 상태 업데이트에 실패했습니다.", ephemeral=True)
+                return
+            
+            db.commit()
+
+            # 재조회(최신화)
+            recruitment_result = select_recruitment(db, recru_id)
+            participants_list = select_participants(db, recru_id)
+
+            embed = build_recruitment_embed(
+                recruitment_result["dungeon_type"],
+                recruitment_result["dungeon_name"],
+                recruitment_result["dungeon_difficulty"],
+                recruitment_result["recru_discript"],
+                recruitment_result["status"],
+                recruitment_result["max_person"],
+                recruitment_result["create_user_id"],
+                participants_list,
+                interaction.message.embeds[0].thumbnail.url,
+                self.recru_id,
+                recruitment_result["create_dt"]
+            )
+
+            await interaction.response.edit_message(embed=embed, view=self)
+            self.remove_all_buttons(self, recruitment_result["status_code"])
+
+            if not update_result:
+                await interaction.response.send_message("❌ 모집취소 상태 업데이트에 실패했습니다.", ephemeral=True)
+                return
+        except Exception as e:
+            logger.error(f"모집취소 버튼 전역오류 : {e}")
+            await interaction.followup.send("❌ 시스템 문제로 모집취소에 실패했습니다.", ephemeral=True)
+
+        finally:
+            db.close()
+
+        await interaction.followup.send("모집이 취소되었습니다.", ephemeral=True)
 
 
 

@@ -252,7 +252,7 @@ class MemberCountView(discord.ui.View):
         )
 
 # ──────────────────────────────
-# 3차 모달 : 상세 내용
+# 상세 내용 입력 : 모달
 # ──────────────────────────────
 class DetailModal(discord.ui.Modal, title="모집 상세 정보"):
     description = discord.ui.TextInput(
