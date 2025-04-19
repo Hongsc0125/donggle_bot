@@ -32,8 +32,6 @@ def select_max_person_setting(db):
     }).fetchone()
     return row[0] if row else None
 
-
-
 # 던전ID 조회
 SELECT_DUNGEON_ID = text("""
     select dungeon_id
@@ -171,6 +169,7 @@ SELECT_PARTICIPANTS = text("""
     SELECT user_id
     FROM participants
     WHERE recru_id = :recru_id
+    AND del_yn = 'N'
 """)
 def select_participants(db, recru_id):
     rows = db.execute(SELECT_PARTICIPANTS, {
@@ -209,3 +208,75 @@ def select_participants_check(db, recru_id, user_id):
         'user_id': str(user_id)
     }).fetchone()
     return row[0] > 0
+
+# 모집 상태값 업데이트
+UPDATE_RECRUITMENT_STATUS = text("""
+    UPDATE recruitments
+    SET status_code = :status_code
+    , update_dt = now()
+    WHERE recru_id = :recru_id
+""")
+def update_recruitment_status(db, status_code, recru_id):
+    row = db.execute(UPDATE_RECRUITMENT_STATUS, {
+        'status_code': status_code,
+        'recru_id': str(recru_id)
+    })
+    return row.rowcount > 0
+
+# 참가자 지원 취소
+DELETE_PARTICIPANTS = text("""
+    UPDATE participants
+    SET del_yn = 'Y'
+    , update_dt = now()
+    WHERE recru_id = :recru_id
+    AND user_id = :user_id
+    AND del_yn = 'N'
+""")
+def delete_participants(db, recru_id, user_id):
+    row = db.execute(DELETE_PARTICIPANTS, {
+        'recru_id': str(recru_id),
+        'user_id': str(user_id)
+    })
+    return row.rowcount > 0
+
+# 초기화용 LIST 조회
+SELECT_ACTIVE_RECRUITMENTS = text("""
+    SELECT
+        A.recru_id, A.list_message_id, B.list_ch_id,
+        (select discript from com_code where value=C.dungeon_type_code and column_name ='dungeon_type_code') as dungeon_type,
+        (select discript from com_code where value=C.dungeon_name_code and column_name ='dungeon_name_code') as dungeon_name,
+        (select discript from com_code where value=C.dungeon_difficulty_code and column_name ='dungeon_difficulty_code') as dungeon_difficulty,
+        (select discript from com_code where value=A.status_code and column_name ='status_code') as status,
+        A.recru_discript, A.max_person, A.create_user_id, A.create_dt, A.status_code
+    FROM recruitments A
+    JOIN pair_channels B ON A.pair_id = B.pair_id
+    JOIN dungeons C ON A.dungeon_id = C.dungeon_id
+    WHERE A.status_code = 2
+    AND A.list_message_id IS NOT NULL
+""")
+def select_active_recruitments(db):
+    list = db.execute(SELECT_ACTIVE_RECRUITMENTS, {
+    }).fetchall()
+    # SQLAlchemy Row를 딕셔너리로 변환
+    return [{
+        'recru_id': row[0],
+        'list_message_id': row[1],
+        'list_ch_id': row[2],
+        'dungeon_type': row[3],
+        'dungeon_name': row[4],
+        'dungeon_difficulty': row[5],
+        'status': row[6],
+        'recru_discript': row[7],
+        'max_person': row[8],
+        'create_user_id': row[9],
+        'create_dt': row[10],
+        'status_code': row[11]
+    } for row in list]
+
+# 모든 리스트 채널 조회
+SELECT_LIST_CHANNELS = text("""
+    SELECT DISTINCT list_ch_id
+    FROM pair_channels
+""")
+def select_list_channels(db):
+    return db.execute(SELECT_LIST_CHANNELS, {}).fetchall()

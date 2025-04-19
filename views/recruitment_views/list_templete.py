@@ -3,6 +3,8 @@ import logging
 from db.session import SessionLocal
 from datetime import datetime
 from queries.recruitment_query import select_recruitment, select_participants, insert_participants, select_participants_check
+from queries.recruitment_query import update_recruitment_status, delete_participants
+
 
 SEPARATOR = "─" * 25
 logger = logging.getLogger(__name__)
@@ -91,13 +93,8 @@ class RecruitmentListButtonView(discord.ui.View):
                 return
             
             self.participants_list = select_participants(db, recru_id) or []
+            self.remove_all_buttons(self.recruitment_result["status_code"])
 
-            # 모집이 마감된 경우 버튼전부 비활성화 (1: 입력중, 2: 모집중, 3: 모집마감, 4: 모집취소)
-            logger.info(f"모집상태코드: {self.recruitment_result['status_code']}")
-            if self.recruitment_result["status_code"] != 2:
-                for item in list(self.children):
-                    if isinstance(item, discord.ui.Button):
-                        self.remove_item(item)
 
         except Exception as e:
             logger.error(f"리스트 버튼 생성중 오류: {e}")
@@ -105,6 +102,7 @@ class RecruitmentListButtonView(discord.ui.View):
 
         finally:
             db.close()
+
 
     # ───────────────────────────────────────────────
     #             지원하기 버튼 & 기능
@@ -136,6 +134,7 @@ class RecruitmentListButtonView(discord.ui.View):
                 await interaction.response.send_message("❌ 모집인원이 초과되었습니다.", ephemeral=True)
                 return
             
+            # 지원자 등록
             insert_result = insert_participants(db, recru_id, user.id)
 
             if insert_result:
@@ -145,6 +144,87 @@ class RecruitmentListButtonView(discord.ui.View):
                 return
 
             # 재조회(최신화)
+            participants_list = select_participants(db, recru_id)
+
+            # 모집인원이 꽉차면 모집마감으로 상태값 업데이트
+            if recruitment_result["max_person"] <= len(participants_list):
+                # 모집마감 상태값 업데이트(3: 모집마감)
+                update_result = update_recruitment_status(db, 3, recru_id=recru_id)
+                if not update_result:
+                    await interaction.response.send_message("❌ 모집마감 상태 업데이트에 실패했습니다.", ephemeral=True)
+                    return
+            
+            db.commit()
+
+            # 재조회(최신화)
+            recruitment_result = select_recruitment(db, recru_id)
+
+            embed = build_recruitment_embed(
+                recruitment_result["dungeon_type"],
+                recruitment_result["dungeon_name"],
+                recruitment_result["dungeon_difficulty"],
+                recruitment_result["recru_discript"],
+                recruitment_result["status"],
+                recruitment_result["max_person"],
+                recruitment_result["create_user_id"],
+                participants_list,
+                interaction.message.embeds[0].thumbnail.url,
+                self.recru_id,
+                recruitment_result["create_dt"]
+            )
+
+            # 버튼제거 검사 및 제거
+            self.remove_all_buttons(recruitment_result["status_code"])
+
+            await interaction.response.edit_message(embed=embed, view=self)
+            await interaction.followup.send("지원 완료!", ephemeral=True)
+
+
+            
+        except Exception as e:
+            logger.error(f"지원하기 버튼 전역오류 : {e}")
+            await interaction.followup.send("❌ 시스템 문제로 지원에 실패했습니다.", ephemeral=True)
+
+        finally:
+            db.close()
+
+    # ───────────────────────────────────────────────
+    #             지원취소 버튼 & 기능
+    # ───────────────────────────────────────────────
+    @discord.ui.button(label="지원취소", style=discord.ButtonStyle.secondary, custom_id="cancel_apply", row=0)
+    async def cancel_apply(self, interaction: discord.Interaction, button: discord.ui.Button):
+        db = SessionLocal()
+        try:
+            recru_id = interaction.message.embeds[0].footer.text
+            user = interaction.user
+
+            recruitment_result = select_recruitment(db, recru_id)
+            
+            if recruitment_result is None:
+                await interaction.response.send_message("❌ 모집이 존재하지 않습니다.", ephemeral=True)
+                return
+            
+            if recruitment_result["status_code"] != 2:
+                await interaction.response.send_message("❌ 모집이 마감 또는 취소되었습니다.", ephemeral=True)
+                return
+
+            if not select_participants_check(db, recru_id, user.id):
+                await interaction.response.send_message("❌ 지원하지 않은 상태입니다.", ephemeral=True)
+                return
+
+            # 지원자 삭제
+            delete_result = delete_participants(db, recru_id, user.id)
+
+            if delete_result:
+                participants_list = select_participants(db, recru_id)
+            else:
+                await interaction.response.send_message("❌ 시스템 문제로 지원취소에 실패했습니다.", ephemeral=True)
+                return
+
+            db.commit()
+
+            # 재조회(최신화)
+            recruitment_result = select_recruitment(db, recru_id)
             participants_list = select_participants(db, recru_id)
 
             embed = build_recruitment_embed(
@@ -162,23 +242,14 @@ class RecruitmentListButtonView(discord.ui.View):
             )
 
             await interaction.response.edit_message(embed=embed, view=self)
-            await interaction.followup.send("지원 완료!", ephemeral=True)
-            db.commit()
+            await interaction.followup.send("지원취소 완료!", ephemeral=True)
 
         except Exception as e:
-            logger.error(f"지원하기 버튼 전역오류 : {e}")
-            await interaction.response.send_message("❌ 시스템 문제로 지원에 실패했습니다.", ephemeral=True)
+            logger.error(f"지원취소 버튼 전역오류 : {e}")
+            await interaction.followup.send("❌ 시스템 문제로 지원취소에 실패했습니다.", ephemeral=True)
 
         finally:
             db.close()
-
-
-    # ───────────────────────────────────────────────
-    #             지원취소 버튼 & 기능
-    # ───────────────────────────────────────────────
-    @discord.ui.button(label="지원취소", style=discord.ButtonStyle.secondary, custom_id="cancel_apply", row=0)
-    async def cancel_apply(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("지원 취소!", ephemeral=True)
 
 
     # ───────────────────────────────────────────────
@@ -198,4 +269,12 @@ class RecruitmentListButtonView(discord.ui.View):
 
 
 
-
+    # ───────────────────────────────────────────────
+    #             버튼 제거
+    # ───────────────────────────────────────────────
+    def remove_all_buttons(self, status_code: int):
+    # 모집중이 아닐시 View에서 모든 버튼을 제거합니다. 
+        if status_code != 2:
+            for item in list(self.children):
+                if isinstance(item, discord.ui.Button):
+                    self.remove_item(item)

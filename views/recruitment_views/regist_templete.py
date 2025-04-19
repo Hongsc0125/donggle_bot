@@ -398,7 +398,7 @@ class ConfirmationView(discord.ui.View):
             await interaction.response.send_message(
                 "✅ 모집이 성공적으로 등록되었습니다!", ephemeral=True
             )
-            
+
             db.commit()
 
         except Exception:
