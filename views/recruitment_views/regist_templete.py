@@ -52,6 +52,7 @@ class RecruitmentButtonView(discord.ui.View):
     async def register_button(self,
                               interaction: discord.Interaction,
                               _: discord.ui.Button):
+
         db = SessionLocal()
         rows: List[DungeonRow] = select_dungeon(db)
         max_person_settings = select_max_person_setting(db)

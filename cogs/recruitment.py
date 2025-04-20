@@ -1,20 +1,42 @@
 import discord
 import asyncio
+from typing import List, Tuple
 from discord.ext import commands
 from discord import app_commands
 import logging
 
 from db.session import SessionLocal
 from core.utils import interaction_response, interaction_followup
-from queries.recruitment_query import select_recruitment_channel, select_recruitment, select_participants, select_active_recruitments, update_recruitment_message_id, select_list_channels
-from views.recruitment_views.regist_templete import RecruitmentButtonView
+from queries.recruitment_query import select_recruitment_channel, select_recruitment, select_participants, select_active_recruitments, update_recruitment_message_id, select_list_channels, select_dungeon, select_max_person_setting
+from views.recruitment_views.regist_templete import RecruitmentButtonView, RecruitmentFormView, _start_embed
 from views.recruitment_views.list_templete import build_recruitment_embed, RecruitmentListButtonView
 
 logger = logging.getLogger(__name__)
+DungeonRow = Tuple[str, str, str]
 
 class RecruitmentCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    @app_commands.command(name="등록", description="새로운 파티 모집을 등록합니다")
+    async def register_recruitment(self, interaction: discord.Interaction):
+        """파티 모집 등록 명령어 - 파티모집버튼과 동일한 기능"""
+        try:
+            # 파티모집버튼과 완전히 동일한 로직 사용
+            db = SessionLocal()
+            rows: List[DungeonRow] = select_dungeon(db)
+            max_person_settings = select_max_person_setting(db)
+            db.close()
+
+            form_view = RecruitmentFormView(rows, max_person_settings)
+            await interaction.response.send_message(
+                embed=_start_embed(), view=form_view, ephemeral=True
+            )
+            form_view.root_msg = await interaction.original_response()
+
+        except Exception as e:
+            logger.error(f"등록 명령어 처리 중 오류: {str(e)}")
+            await interaction_response(interaction, "명령어 처리 중 오류가 발생했습니다.", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -69,6 +91,17 @@ class RecruitmentCog(commands.Cog):
         
         logger.info(f"등록 채널 {channel_id} 초기화 시작")
         view = RecruitmentButtonView()
+
+        instruction_embed = discord.Embed(
+            title="**파티 모집 버튼을 눌러주세요!**",
+            description="버튼이 동작을 안한다면 명령어를 입력해주세요.\n\n" +
+            "> **모집 등록 명령어** \n"
+            "> `/등록`\n\n" +
+            "> **사용법**\n" +
+            "> `/등록` 명령어를 입력한 후 절차에 따라 정보를 선택하세요.",
+            color=discord.Color.from_rgb(178, 96, 255)
+        ).set_thumbnail(url="https://harmari.duckdns.org/static/마비로고.png")
+
         last_message = None
         try:
             async for message in channel.history(limit=50, oldest_first=False):
@@ -85,6 +118,7 @@ class RecruitmentCog(commands.Cog):
                 ):
                     last_message = message
                     break
+
         except Exception as e:
             logger.warning(f"채널 {channel_id} 메시지 조회 실패: {str(e)}")
 
@@ -96,7 +130,7 @@ class RecruitmentCog(commands.Cog):
                             await message.delete()
                         except Exception as e:
                             logger.warning(f"메시지 삭제 실패: {str(e)}")
-                await last_message.edit(view=view)
+                await last_message.edit(embed=instruction_embed, view=view)
                 logger.info(f"등록 채널 {channel_id} 기존 버튼 메시지 업데이트 완료")
             except Exception as e:
                 logger.warning(f"등록 채널 {channel_id} 버튼 갱신/정리 실패: {str(e)}")
@@ -109,6 +143,7 @@ class RecruitmentCog(commands.Cog):
                         except Exception as e:
                             logger.warning(f"메시지 삭제 실패: {str(e)}")
                 await channel.send(
+                    embed=instruction_embed,
                     view=view
                 )
                 logger.info(f"등록 채널 {channel_id} 새 버튼 메시지 생성 완료")
