@@ -1,6 +1,8 @@
 import logging
 import asyncio
 import traceback
+import time
+from datetime import datetime, timedelta
 
 import discord
 from discord.ext import commands, tasks
@@ -30,6 +32,8 @@ class Donggle(commands.Bot):
         }
         super().__init__(**kwargs)
         self.check_channel_status.start()  # 루프 시작
+        self.last_heartbeat = datetime.now()
+        self.connection_monitor.start()  # 연결 모니터링 시작
 
     async def setup_hook(self):
         extensions = [
@@ -60,6 +64,75 @@ class Donggle(commands.Bot):
         if recruitment_cog:
             await recruitment_cog.on_ready()
 
+    @tasks.loop(seconds=30)
+    async def connection_monitor(self):
+        """디스코드 연결 상태를 모니터링하고 필요시 재연결"""
+        try:
+            # 현재 웹소켓 상태 확인
+            if self.is_closed():
+                logger.warning("웹소켓 연결이 닫혀있음. 재연결 시도...")
+                await self.reconnect()
+                return
+
+            # 마지막 하트비트가 90초 이상 지났는지 확인
+            if datetime.now() - self.last_heartbeat > timedelta(seconds=90):
+                logger.warning("하트비트 타임아웃 감지. 재연결 시도...")
+                await self.reconnect()
+                return
+                
+            # 연결 상태 로깅
+            latency = self.latency * 1000  # ms로 변환
+            if latency > 500:  # 지연시간이 500ms 이상이면 경고
+                logger.warning(f"높은 지연시간 감지: {latency:.2f}ms")
+            else:
+                logger.debug(f"현재 지연시간: {latency:.2f}ms")
+                
+            # 하트비트 전송
+            self.last_heartbeat = datetime.now()
+            logger.debug(f"하트비트 전송: {self.last_heartbeat}")
+            
+        except Exception as e:
+            logger.error(f"연결 모니터링 중 오류 발생: {e}")
+
+    @connection_monitor.before_loop
+    async def before_connection_monitor(self):
+        """연결 모니터링 시작 전 봇 준비 대기"""
+        await self.wait_until_ready()
+
+    async def reconnect(self):
+        """디스코드 연결 재시도"""
+        try:
+            logger.info("디스코드 재연결 시도 중...")
+            # 기존 연결 종료
+            if not self.is_closed():
+                await self.close()
+            
+            # 잠시 대기 후 재연결
+            await asyncio.sleep(5)
+            
+            # 재연결
+            await self.login(settings.DISCORD_TOKEN)
+            await self.connect(reconnect=True)
+            
+            logger.info("디스코드 재연결 성공")
+            self.last_heartbeat = datetime.now()
+        except Exception as e:
+            logger.error(f"재연결 시도 중 오류 발생: {e}")
+
+    async def on_resumed(self):
+        """세션이 재개되었을 때 호출되는 이벤트"""
+        logger.info("디스코드 세션이 재개되었습니다.")
+        self.last_heartbeat = datetime.now()
+
+    async def on_connect(self):
+        """봇이 디스코드에 연결되었을 때 호출되는 이벤트"""
+        logger.info("디스코드에 연결되었습니다.")
+        self.last_heartbeat = datetime.now()
+
+    async def on_disconnect(self):
+        """봇이 디스코드와 연결이 끊겼을 때 호출되는 이벤트"""
+        logger.warning("디스코드와 연결이 끊겼습니다. 자동 재연결을 시도합니다.")
+
 
 async def main():
     try:
@@ -67,6 +140,10 @@ async def main():
         bot = Donggle()
         # 봇 실행
         await bot.start(settings.DISCORD_TOKEN)
+    except discord.errors.LoginFailure as e:
+        logger.critical(f"디스코드 로그인 실패: {e}")
+    except discord.errors.ConnectionClosed as e:
+        logger.error(f"디스코드 연결 종료: {e}")
     except Exception as e:
         logger.error(f"봇 실행 중 오류 발생: {e}")
 
