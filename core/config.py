@@ -1,4 +1,4 @@
-# core/config.py
+# app/core/config.py
 from pydantic_settings import BaseSettings
 from datetime import datetime
 import pytz
@@ -7,26 +7,33 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class Settings(BaseSettings):
     DATABASE_URL: str
     DATABASE_NAME: str
     DB_PW: str
     DB_USER: str
-    
+
     # 디코
     DISCORD_TOKEN: str
     APPLICATION_ID: str
+    PUBLIC_KEY: str
+
+    # SERVER
+    REMOTE_HOST: str
+    REMOTE_PORT: str
+    REMOTE_TARGET: str
+    REMOTE_USER: str
 
     class Config:
-        env_file = 'real.env'
+        env_file = '.env'
         env_file_encoding = 'utf-8'
-        extra = "ignore"  # 알 수 없는 추가 필드 무시
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         encoded_user = quote_plus(self.DB_USER)
         encoded_pw = quote_plus(self.DB_PW)
-        self.DATABASE_URL = f"mongodb://{encoded_user}:{encoded_pw}@{self.DATABASE_URL}/{self.DATABASE_NAME}?authSource=admin"
+        self.DATABASE_URL = f"postgresql://{encoded_user}:{encoded_pw}@{self.DATABASE_URL}/{self.DATABASE_NAME}"
 
     @property
     def CURRENT_DATETIME(self) -> str:
