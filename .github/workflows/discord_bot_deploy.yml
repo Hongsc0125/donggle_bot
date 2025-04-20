@@ -1,0 +1,102 @@
+name: Discord Bot Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+
+      - name: List directories for debugging
+        run: ls -la
+
+      - name: Configure SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+      - name: Add remote host to known_hosts
+        run: |
+          ssh-keyscan -p ${{ secrets.REMOTE_PORT }} ${{ secrets.REMOTE_HOST }} >> ~/.ssh/known_hosts
+          
+      - name: Create real.env file
+        run: |
+          cat << 'EOF' > real.env
+          # MongoDB 설정
+          DATABASE_NAME=${{ secrets.DATABASE_NAME }}
+          DATABASE_URL=${{ secrets.DATABASE_URL }}
+          DB_PW=${{ secrets.DB_PW }}
+          DB_USER=${{ secrets.DB_USER }}
+
+          # DISCORD
+          DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }}
+          APPLICATION_ID=${{ secrets.APPLICATION_ID }}
+          EOF
+          cat real.env
+
+      - name: Set up remote directory and clean up
+        run: |
+          ssh -p ${{ secrets.REMOTE_PORT }} \
+              -i ~/.ssh/id_rsa \
+              -o StrictHostKeyChecking=no \
+              ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} << 'EOSSH'
+                mkdir -p ${{ secrets.REMOTE_TARGET }}
+                # 가상환경과 .env 파일 외 모든 파일 삭제 준비
+                find ${{ secrets.REMOTE_TARGET }} -maxdepth 1 -not -name ".venv" -not -name "real.env" -not -path "${{ secrets.REMOTE_TARGET }}" | xargs rm -rf 2>/dev/null || true
+                echo ">>> Remote directory cleaned and ready for fresh copy"
+          EOSSH
+
+      - name: Copy entire repository to remote server
+        run: |
+          # .git 및 .github 폴더를 제외한 전체 리포지토리 복사
+          rsync -avz --exclude='.git' --exclude='.github' --exclude='.venv' \
+                -e "ssh -p ${{ secrets.REMOTE_PORT }} -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" \
+                ./ ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }}:${{ secrets.REMOTE_TARGET }}/
+          echo ">>> Copied entire repository successfully"
+
+      - name: Copy env file to remote server
+        run: |
+          scp -P ${{ secrets.REMOTE_PORT }} \
+              -i ~/.ssh/id_rsa \
+              -o StrictHostKeyChecking=no \
+              real.env \
+              ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }}:${{ secrets.REMOTE_TARGET }}
+
+      - name: Install dependencies and restart bot
+        run: |
+          ssh -p ${{ secrets.REMOTE_PORT }} \
+              -i ~/.ssh/id_rsa \
+              -o StrictHostKeyChecking=no \
+              ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} 'bash -s' << 'EOSSH'
+                cd ${{ secrets.REMOTE_TARGET }}
+                
+                echo ">>> Activating virtual environment..."
+                source .venv/bin/activate
+                
+                echo ">>> Installing requirements..."
+                pip install -r requirements.txt
+                
+                echo ">>> Stopping existing bot process..."
+                pkill -f "python bot.py" || echo "No bot process found"
+                
+                echo ">>> Starting Discord bot in background..."
+                nohup python bot.py > bot.log 2>&1 &
+                echo ">>> Done. Discord bot is running in background."
+                
+                # Check if bot is running
+                sleep 5
+                if pgrep -f "python bot.py" > /dev/null; then
+                  echo ">>> Bot successfully started!"
+                else
+                  echo ">>> Failed to start bot. Check log files."
+                  exit 1
+                fi
+          EOSSH
