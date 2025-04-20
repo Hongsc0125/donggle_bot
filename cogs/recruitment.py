@@ -5,6 +5,7 @@ from discord import app_commands
 import logging
 
 from db.session import SessionLocal
+from core.utils import interaction_response, interaction_followup
 from queries.recruitment_query import select_recruitment_channel, select_recruitment, select_participants, select_active_recruitments, update_recruitment_message_id, select_list_channels
 from views.recruitment_views.regist_templete import RecruitmentButtonView
 from views.recruitment_views.list_templete import build_recruitment_embed, RecruitmentListButtonView
@@ -18,47 +19,46 @@ class RecruitmentCog(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info("모집 시스템 초기화 시작...")
-        db = SessionLocal()
-        try:
-            # 1. 모집중인 공고 목록 조회
-            active_recruitments = select_active_recruitments(db)
-            logger.info(f"활성 모집 공고 {len(active_recruitments)}개 로드됨")
-            
-            # 2. 등록채널 버튼 메시지 초기화
-            regist_channel_ids = select_recruitment_channel(db)
-            logger.info(f"등록 채널 {len(regist_channel_ids)}개 로드됨")
-            
-            for row in regist_channel_ids:
-                channel_id = int(row[0])
-                await self.initialize_registration_channel(channel_id)
-            
-            # 3. 리스트 채널 초기화
-            # 모든 리스트 채널 조회
-            list_channels = select_list_channels(db)
-            logger.info(f"리스트 채널 {len(list_channels)}개 로드됨")
-            
-            # 모집 공고 수집 - 채널 별로 정리
-            channel_messages = {}
-            for recruitment in active_recruitments:
-                list_ch_id = int(recruitment['list_ch_id'])
-                if list_ch_id not in channel_messages:
-                    channel_messages[list_ch_id] = []
-                channel_messages[list_ch_id].append(recruitment)
-            
-            # 채널별로 처리 (모든 리스트 채널 처리)
-            for channel_id in list_channels:
-                ch_id = int(channel_id[0])
-                recruitments = channel_messages.get(ch_id, [])
-                logger.info(f"리스트 채널 {ch_id} 초기화 시작 (공고 {len(recruitments)}개)")
-                await self.initialize_list_channel(db, ch_id, recruitments)
-            
-            db.commit()
-            logger.info("모든 채널 초기화 완료")
-        except Exception as e:
-            db.rollback()
-            logger.error(f"채널 초기화 중 오류 발생: {str(e)}")
-        finally:
-            db.close()
+        # db = SessionLocal()
+        with SessionLocal() as db:
+            try:
+                # 1. 모집중인 공고 목록 조회
+                active_recruitments = select_active_recruitments(db)
+                logger.info(f"활성 모집 공고 {len(active_recruitments)}개 로드됨")
+                
+                # 2. 등록채널 버튼 메시지 초기화
+                regist_channel_ids = select_recruitment_channel(db)
+                logger.info(f"등록 채널 {len(regist_channel_ids)}개 로드됨")
+                
+                for row in regist_channel_ids:
+                    channel_id = int(row[0])
+                    await self.initialize_registration_channel(channel_id)
+                
+                # 3. 리스트 채널 초기화
+                # 모든 리스트 채널 조회
+                list_channels = select_list_channels(db)
+                logger.info(f"리스트 채널 {len(list_channels)}개 로드됨")
+                
+                # 모집 공고 수집 - 채널 별로 정리
+                channel_messages = {}
+                for recruitment in active_recruitments:
+                    list_ch_id = int(recruitment['list_ch_id'])
+                    if list_ch_id not in channel_messages:
+                        channel_messages[list_ch_id] = []
+                    channel_messages[list_ch_id].append(recruitment)
+                
+                # 채널별로 처리 (모든 리스트 채널 처리)
+                for channel_id in list_channels:
+                    ch_id = int(channel_id[0])
+                    recruitments = channel_messages.get(ch_id, [])
+                    logger.info(f"리스트 채널 {ch_id} 초기화 시작 (공고 {len(recruitments)}개)")
+                    await self.initialize_list_channel(db, ch_id, recruitments)
+                
+                db.commit()
+                logger.info("모든 채널 초기화 완료")
+            except Exception as e:
+                db.rollback()
+                logger.error(f"채널 초기화 중 오류 발생: {str(e)}")
 
     async def initialize_registration_channel(self, channel_id):
         """등록 채널 초기화 - 버튼 메시지 설정"""
@@ -196,7 +196,10 @@ class RecruitmentCog(commands.Cog):
         except Exception as e:
             logger.error(f"채널 {channel_id} 메시지 정리 중 오류: {str(e)}")
 
+
+# ───────────────────────────────────────────────
 # Cog를 등록하는 설정 함수
+# ───────────────────────────────────────────────
 async def setup(bot):
     await bot.add_cog(RecruitmentCog(bot))
 

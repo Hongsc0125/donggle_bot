@@ -51,18 +51,10 @@ class Donggle(commands.Bot):
 
             logger.info(f"명령어 트리가 동기화되었습니다. {len(synced_commands)}개 명령어 등록됨.")
 
-            # 명령어 목록 로그 출력
-            # if synced_commands:
-            #     logger.info("등록된 명령어 목록:")
-            #     for cmd in synced_commands:
-            #         logger.info(f"- {cmd.name}: {cmd.description}")
-            # else:
-            #     logger.info("등록된 명령어가 없습니다.")
-
         except Exception as e:
             logger.error(f"명령어 트리 동기화 중 오류 발생: {e}")
 
-    @tasks.loop(minutes=5)
+    @tasks.loop(minutes=2)
     async def check_channel_status(self):
         recruitment_cog = self.get_cog("RecruitmentCog")
         if recruitment_cog:

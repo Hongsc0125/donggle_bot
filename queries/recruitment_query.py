@@ -121,11 +121,15 @@ SELECT_RECRUITMENT = text("""
         , A.list_message_id
         , A.create_dt
         , A.status_code
+        , D.parents_thread_ch_id
+        , A.create_user_id
     FROM recruitments A
     JOIN pair_channels B
     ON A.pair_id = B.pair_id
     JOIN dungeons C
     ON A.dungeon_id = C.dungeon_id
+    JOIN guilds D
+    ON B.guild_id = D.guild_id
     WHERE 1=1
     AND recru_id = :recru_id
 """)
@@ -146,7 +150,9 @@ def select_recruitment(db, recru_id):
         'list_ch_id': row[8],
         'list_message_id': row[9],
         'create_dt': row[10],
-        'status_code': row[11]
+        'status_code': row[11],
+        'parents_thread_ch_id': row[12],
+        'create_user_id': row[13]
     }
 
 

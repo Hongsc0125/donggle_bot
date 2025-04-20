@@ -3,6 +3,7 @@ from typing import List, Tuple
 
 import discord
 from db.session import SessionLocal
+from core.utils import interaction_response, interaction_followup
 from queries.recruitment_query import select_dungeon, select_pair_channel_id, select_dungeon_id, insert_recruitment, select_recruitment
 from queries.recruitment_query import update_recruitment_message_id, select_max_person_setting
 
@@ -199,9 +200,7 @@ class RecruitmentFormView(discord.ui.View):
     # ───── 취소
     async def cancel_recruitment(self, interaction: discord.Interaction):
         """모집 과정을 취소하고 에페메럴 안내 후 마스터 메시지 삭제."""
-        await interaction.response.send_message(
-            "모집 등록이 취소되었습니다.", ephemeral=True
-        )
+        await interaction_response(interaction, "모집 등록이 취소되었습니다.")
         # 마스터 메시지 제거
         if self.root_msg:
             await self.root_msg.delete()
@@ -275,7 +274,7 @@ class DetailModal(discord.ui.Modal, title="모집 상세 정보"):
             "난이도": self.form.diff,
             "모집 인원 표시": f"{self.count}명(본인 포함)",
             "모집 인원": self.count,
-            "상세 내용": self.description.value or "추가 내용 없음",
+            "상세 내용": self.description.value or "모집합니다!",
         }
 
         confirm_embed = discord.Embed(
@@ -313,9 +312,7 @@ class ConfirmationView(discord.ui.View):
             )
 
             if not pair_id and not dungeon_id:
-                await interaction.response.send_message(
-                    "❌ PAIR_ID, DUNGEON_ID 데이터베이스 조회 실패. 운영자에게 문의해주세요.", ephemeral=True
-                )
+                await interaction_response(interaction, "❌ PAIR_ID, DUNGEON_ID 데이터베이스 조회 실패. 운영자에게 문의해주세요.")
                 return
             
             recru_id = insert_recruitment(
@@ -329,9 +326,7 @@ class ConfirmationView(discord.ui.View):
             )
 
             if(not recru_id):
-                await interaction.response.send_message(
-                    "❌ 모집 등록 실패. 운영자에게 문의해주세요.", ephemeral=True
-                )
+                await interaction_response(interaction, "❌ 모집 등록 실패. 운영자에게 문의해주세요.")
                 return
             else:
                 logger.info(f"모집 등록 성공: {recru_id}")
@@ -341,9 +336,7 @@ class ConfirmationView(discord.ui.View):
             regist_data = select_recruitment(db, recru_id)
 
             if regist_data is None:
-                await interaction.response.send_message(
-                    "❌ 모집 정보를 불러오지 못했습니다.", ephemeral=True
-                )
+                await interaction_response(interaction, "❌ 모집 정보를 불러오지 못했습니다.")
                 db.rollback()
                 return
 
@@ -357,9 +350,7 @@ class ConfirmationView(discord.ui.View):
 
             channel = interaction.guild.get_channel(int(regist_data['list_ch_id']))
             if channel is None:
-                await interaction.response.send_message(
-                    "❌ 모집 등록 실패(채널가져오기 실패). 운영자에게 문의해주세요.", ephemeral=True
-                )
+                await interaction_response(interaction, "❌ 모집 등록 실패(채널가져오기 실패). 운영자에게 문의해주세요.")
                 db.rollback()
                 return
             
@@ -388,24 +379,18 @@ class ConfirmationView(discord.ui.View):
             logger.info(f"모집 등록 {result} : {recru_id} / 메시지 ID: {message_id}")
 
             if not result:
-                await interaction.response.send_message(
-                    "❌ 모집 등록 실패(메시지 ID 저장 실패). 운영자에게 문의해주세요.", ephemeral=True
-                )
+                await interaction_response(interaction, "❌ 모집 등록 실패(메시지 ID 저장 실패). 운영자에게 문의해주세요.")
                 db.rollback()
                 await msg.delete()
                 return
 
-            await interaction.response.send_message(
-                "✅ 모집이 성공적으로 등록되었습니다!", ephemeral=True
-            )
+            await interaction_response(interaction, "✅ 모집이 성공적으로 등록되었습니다!")
 
             db.commit()
 
         except Exception:
             logger.exception("모집 등록 실패")
-            await interaction.response.send_message(
-                "❌ 모집 등록 중 오류가 발생했습니다.", ephemeral=True
-            )
+            await interaction_response(interaction, "❌ 모집 등록 중 오류가 발생했습니다.")
             db.rollback()
         finally:
             await self.root_msg.delete()
@@ -413,8 +398,6 @@ class ConfirmationView(discord.ui.View):
 
     @discord.ui.button(label="취소", style=discord.ButtonStyle.danger)
     async def cancel(self, interaction: discord.Interaction, _):
-        await interaction.response.send_message(
-            "모집 등록이 취소되었습니다.", ephemeral=True
-        )
+        await interaction_response(interaction, "모집 등록이 취소되었습니다.")
         await self.root_msg.delete()
 
