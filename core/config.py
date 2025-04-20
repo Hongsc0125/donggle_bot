@@ -19,12 +19,6 @@ class Settings(BaseSettings):
     APPLICATION_ID: str
     PUBLIC_KEY: str
 
-    # SERVER
-    REMOTE_HOST: str
-    REMOTE_PORT: str
-    REMOTE_TARGET: str
-    REMOTE_USER: str
-
     class Config:
         env_file = '.env'
         env_file_encoding = 'utf-8'

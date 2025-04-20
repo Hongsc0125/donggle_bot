@@ -39,6 +39,7 @@ jobs:
           # DISCORD
           DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }}
           APPLICATION_ID=${{ secrets.APPLICATION_ID }}
+          PUBLIC_KEY=${{ secrets.PUBLIC_KEY }}
           EOF
           cat real.env
 
