@@ -85,15 +85,15 @@ jobs:
                 pip install -r requirements.txt
                 
                 echo ">>> Stopping existing bot process..."
-                pkill -f "python bot.py" || echo "No bot process found"
+                pkill -f "python main.py" || echo "No bot process found"
                 
                 echo ">>> Starting Discord bot in background..."
-                nohup python bot.py > bot.log 2>&1 &
+                nohup python main.py > bot.log 2>&1 &
                 echo ">>> Done. Discord bot is running in background."
                 
                 # Check if bot is running
                 sleep 5
-                if pgrep -f "python bot.py" > /dev/null; then
+                if pgrep -f "python main.py" > /dev/null; then
                   echo ">>> Bot successfully started!"
                 else
                   echo ">>> Failed to start bot. Check log files."
