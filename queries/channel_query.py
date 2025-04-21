@@ -87,3 +87,29 @@ def update_thread_channel(db, guild_id, channel_id):
         'channel_id': str(channel_id)
     })
     return row.rowcount > 0
+
+# 음성채널 부모채널 설정
+UPDATE_VOICE_CHANNEL = text("""
+    UPDATE guilds
+    SET parents_voice_ch_id = :channel_id
+    , update_dt = now()
+    WHERE guild_id = :guild_id
+""")
+def update_voice_channel(db, guild_id, channel_id):
+    row = db.execute(UPDATE_VOICE_CHANNEL, {
+        'guild_id': str(guild_id),
+        'channel_id': str(channel_id)
+    })
+    return row.rowcount > 0
+
+# 길드의 음성채널 부모채널 ID 조회
+SELECT_VOICE_CHANNEL = text("""
+    SELECT parents_voice_ch_id
+    FROM guilds
+    WHERE guild_id = :guild_id
+""")
+def select_voice_channel(db, guild_id):
+    row = db.execute(SELECT_VOICE_CHANNEL, {
+        'guild_id': str(guild_id)
+    }).fetchone()
+    return row[0] if row and row[0] else None

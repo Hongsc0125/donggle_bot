@@ -4,6 +4,7 @@ from db.session import SessionLocal
 from core.utils import interaction_response, interaction_followup
 from queries.recruitment_query import select_recruitment, select_participants
 from queries.thread_query import insert_complete_recruitment, update_complete_recruitment
+from queries.channel_query import select_voice_channel
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,7 @@ class ThreadButtonView(discord.ui.View):
     @discord.ui.button(label="음성채널 생성", style=discord.ButtonStyle.success, custom_id="create_voice", disabled=True)
     async def create_voice_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)  # ephemeral=True로 설정하여 본인에게만 보이게 함
 
         try:
             with SessionLocal() as db:
@@ -105,44 +106,51 @@ class ThreadButtonView(discord.ui.View):
                     return
 
                 guild = interaction.guild
-                category = interaction.channel.category
-                creator = await guild.fetch_member(int(recruitment_result["create_user_id"]))
-                creator_name = creator.display_name if creator else "파티장"
-                channel_name = f"{creator_name}의 {recruitment_result['dungeon_type']} 파티"
-
-                overwrites = {
-                    guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False),
-                    guild.me: discord.PermissionOverwrite(view_channel=True, connect=True, manage_channels=True),
-                    creator: discord.PermissionOverwrite(view_channel=True, connect=True, manage_channels=True)
-                }
-
-                self.voice_channel = await guild.create_voice_channel(
-                    name=channel_name,
-                    category=category,
-                    overwrites=overwrites,
-                    reason="파티 음성채널 생성"
-                )
-
+                
+                # 파티장 정보 확인
+                creator_id = int(recruitment_result["create_user_id"])
+                
+                # 파티장만 버튼 클릭 가능
+                if interaction.user.id != creator_id:
+                    await interaction.followup.send("❌ 파티장만 음성채널을 생성할 수 있습니다.", ephemeral=True)
+                    return
+                
+                # DB에서 부모 음성채널 ID 조회
+                parent_voice_ch_id = select_voice_channel(db, guild.id)
+                
+                if not parent_voice_ch_id:
+                    # 부모 음성채널이 설정되지 않은 경우 오류 메시지 표시
+                    await interaction.followup.send("❌ 부모 음성채널이 설정되지 않았습니다. 서버 관리자에게 문의하세요.", ephemeral=True)
+                    return
+                
+                # 부모 음성채널이 설정된 경우 해당 채널 안내
+                parent_channel = guild.get_channel(int(parent_voice_ch_id))
+                if not parent_channel:
+                    await interaction.followup.send("❌ 설정된 음성채널을 찾을 수 없습니다.", ephemeral=True)
+                    return
+                
+                # 음성채널 ID 업데이트
                 update_complete_recruitment(
                     db,
                     recru_id=self.recru_id,
-                    voice_ch_id=self.voice_channel.id
+                    voice_ch_id=parent_channel.id
                 )
                 db.commit()
 
-                voice_invite = await self.voice_channel.create_invite(max_age=3600)
-
-                button.label = "🔊 음성채널 참여"
-                button.style = discord.ButtonStyle.primary
+                # 버튼 비활성화
                 button.disabled = True
-
+                button.label = "🔊 음성채널 안내 완료"
+                button.style = discord.ButtonStyle.primary
+                
                 await interaction.edit_original_response(view=self)
-
-                # 전체 메시지로 초대장 보내기
-                await interaction.channel.send(
-                    f"🔊 **음성채널이 생성되었습니다!**\n"
-                    f"파티원 여러분은 이 링크를 통해 참여해주세요: [음성채널 참여하기]({voice_invite})"
+                
+                # 파티장에게만 보이는 부모 음성채널 안내 메시지
+                embed = discord.Embed(
+                    title="🔊 음성채널 입장 안내",
+                    description=f"아래 음성채널에 입장하시면 파티원들만 참여할 수 있는 임시 음성채널이 자동으로 생성됩니다.\n\n> 입장 {parent_channel.mention}\n\n⚠️ 임시 음성채널은 서버 채널 목록에서 확인할 수 있으며, 모든 인원이 퇴장하면 자동으로 삭제됩니다.",
+                    color=0x5865F2
                 )
+                await interaction.followup.send(embed=embed, ephemeral=True)
 
         except discord.NotFound as e:
             if getattr(e, "code", None) == 10062:
@@ -160,12 +168,13 @@ class ThreadButtonView(discord.ui.View):
                     delete_after=2
                 )
             else:
-                logger.error(f"음성채널 생성 실패: {e}")
+                logger.error(f"음성채널 처리 실패: {e}")
+                await interaction.followup.send(f"❌ 음성채널 처리 중 오류가 발생했습니다: {e}", ephemeral=True)
 
         except Exception as e:
-            logger.error(f"음성채널 생성 중 오류: {e}")
+            logger.error(f"음성채널 처리 중 오류: {e}")
             await interaction.followup.send(
-                f"❌ 음성채널 생성 중 오류가 발생했습니다: {e}", ephemeral=True
+                f"❌ 음성채널 처리 중 오류가 발생했습니다: {e}", ephemeral=True
             )
 
 

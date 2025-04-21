@@ -6,7 +6,7 @@ from datetime import datetime
 
 from db.session import SessionLocal
 from core.utils import interaction_response, interaction_followup
-from queries.channel_query import get_pair_channel, insert_pair_channel, insert_guild_auth, select_guild_auth, select_super_user, update_thread_channel
+from queries.channel_query import get_pair_channel, insert_pair_channel, insert_guild_auth, select_guild_auth, select_super_user, update_thread_channel, update_voice_channel
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +168,43 @@ class ChannelCog(commands.Cog):
             await interaction_response(interaction, "이 명령어는 관리자만 사용할 수 있습니다.")
         else:
             logger.error(f"쓰레드 채널 설정 중 오류: {error}")
+            await interaction_response(interaction, "명령어 실행 중 오류가 발생했습니다.")
+
+    @app_commands.command(name="음성채널설정", description="음성채널 버튼 클릭 시 입장할 음성채널을 설정합니다.")
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.describe(
+        channel="입장할 음성채널을 선택"
+    )
+    async def set_voice_channel(
+            self,
+            interaction: discord.Interaction,
+            channel: discord.VoiceChannel
+    ):
+        await interaction.response.defer(ephemeral=True)
+        with SessionLocal() as db:
+            try:
+                update_result = update_voice_channel(
+                    db, interaction.guild.id, channel.id
+                )
+
+                if not update_result:
+                    await interaction_followup(interaction, "음성채널 설정에 실패했습니다.")
+                    return
+
+                db.commit()
+                await interaction_followup(interaction, f"음성채널 {channel.mention} 설정완료.")
+
+            except Exception as e:
+                logger.error(f"음성채널 설정 중 오류 발생: {str(e)}")
+                await interaction_followup(interaction, f"음성채널 설정 중 오류가 발생했습니다: {str(e)}")
+
+    @set_voice_channel.error
+    async def voice_channel_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        """음성채널 설정 중 오류 처리"""
+        if isinstance(error, app_commands.errors.MissingPermissions):
+            await interaction_response(interaction, "이 명령어는 관리자만 사용할 수 있습니다.")
+        else:
+            logger.error(f"음성채널 설정 중 오류: {error}")
             await interaction_response(interaction, "명령어 실행 중 오류가 발생했습니다.")
 
 

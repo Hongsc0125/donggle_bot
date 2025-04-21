@@ -38,7 +38,8 @@ class Donggle(commands.Bot):
     async def setup_hook(self):
         extensions = [
             "cogs.channel",
-            "cogs.recruitment"
+            "cogs.recruitment",
+            "cogs.voice_channel"
         ]
         for ext in extensions:
             try:
