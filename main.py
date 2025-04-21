@@ -40,7 +40,7 @@ class Donggle(commands.Bot):
             "cogs.channel",
             "cogs.recruitment",
             "cogs.voice_channel",
-            "cogs.alert"  # Add the new alert cog
+            "cogs.alert"
         ]
         for ext in extensions:
             try:
@@ -48,15 +48,22 @@ class Donggle(commands.Bot):
                 logger.info(f"Loaded extension: {ext}")
             except Exception as e:
                 logger.error(f"Failed to load extension {ext}: {e}")
+        
         # 봇이 준비되면 자동으로 명령어 동기화
         try:
-            synced_commands = await self.tree.sync()
-
-            # 테스트길드 바로 동기화
-            await self.tree.sync(guild=discord.Object(id=1359677298604900462))
-
-            logger.info(f"명령어 트리가 동기화되었습니다. {len(synced_commands)}개 명령어 등록됨.")
-
+            # 전역 명령어 동기화 실패 시 개별 길드 동기화로 폴백
+            try:
+                synced_commands = await self.tree.sync()
+                logger.info(f"전역 명령어 트리가 동기화되었습니다. {len(synced_commands)}개 명령어 등록됨.")
+            except Exception as e:
+                logger.warning(f"전역 명령어 동기화 실패: {e}")
+                # 현재 참여 중인 모든 길드에 개별적으로 명령어 등록
+                for guild in self.guilds:
+                    try:
+                        guild_cmds = await self.tree.sync(guild=discord.Object(id=guild.id))
+                        logger.info(f"길드 {guild.name} ({guild.id})에 {len(guild_cmds)}개 명령어 등록됨.")
+                    except Exception as guild_e:
+                        logger.warning(f"길드 {guild.id} 명령어 동기화 실패: {guild_e}")
         except Exception as e:
             logger.error(f"명령어 트리 동기화 중 오류 발생: {e}")
 

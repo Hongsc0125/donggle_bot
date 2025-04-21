@@ -14,7 +14,7 @@ async def interaction_response(interaction: discord.Interaction, message: str, e
             # await asyncio.sleep(2)
             # await msg.delete()
     except discord.HTTPException as e:
-        logger.error(f"Interaction response error: {str(e)}")
+        logger.error(f"Interaction response error: {e}")
 
 # 2초 후 삭제되는 ephemeral followup 메시지 전송
 async def interaction_followup(interaction: discord.Interaction, message: str, ephemeral: bool = True):
@@ -24,4 +24,4 @@ async def interaction_followup(interaction: discord.Interaction, message: str, e
             # await asyncio.sleep(2)
             # await msg.delete()
     except discord.HTTPException as e:
-        logger.error(f"Interaction followup error: {str(e)}")
+        logger.error(f"Interaction followup error: {e}")

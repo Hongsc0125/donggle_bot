@@ -3,7 +3,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Check if alert table exists
+# 알림 테이블이 존재하는지 확인
 CHECK_ALERT_TABLE = text("""
     SELECT EXISTS (
         SELECT FROM information_schema.tables 
@@ -18,8 +18,8 @@ def check_alert_table_exists(db):
         logger.error(f"Error checking alert table: {e}")
         return False
 
-#  alert_type = boss, barrier, mon, tue, wed, thu, fri, sat, sun / custom
-#  interval = day, week, month
+# alert_type = boss, barrier, mon, tue, wed, thu, fri, sat, sun / custom
+# interval = day, week, month
 ALERT_LIST = text("""
     SELECT alert_id, interval, alert_type, alert_time
     FROM alert  
@@ -41,7 +41,7 @@ def get_alert_list(db, alert_type):
         logger.error(f"Error getting alert list: {e}")
         return []
 
-# Get all alert by category (excluding custom)
+# 모든 알림 카테고리별로 가져오기(커스텀 제외)
 GET_ALL_alert = text("""
     SELECT alert_id, interval, alert_type, alert_time
     FROM alert

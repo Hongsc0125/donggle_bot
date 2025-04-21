@@ -6,7 +6,7 @@ from datetime import datetime
 
 from db.session import SessionLocal
 from core.utils import interaction_response, interaction_followup
-from queries.channel_query import get_pair_channel, insert_pair_channel, insert_guild_auth, select_guild_auth, select_super_user, update_thread_channel, update_voice_channel
+from queries.channel_query import get_pair_channel, insert_pair_channel, insert_guild_auth, select_guild_auth, select_super_user, update_thread_channel, update_voice_channel, update_alert_channel
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +205,50 @@ class ChannelCog(commands.Cog):
             await interaction_response(interaction, "이 명령어는 관리자만 사용할 수 있습니다.")
         else:
             logger.error(f"음성채널 설정 중 오류: {error}")
+            await interaction_response(interaction, "명령어 실행 중 오류가 발생했습니다.")
+
+    @app_commands.command(name="알림채널설정", description="알림 기능을 사용할 채널을 설정합니다.")
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.describe(
+        channel="알림 채널을 선택"
+    )
+    async def set_alert_channel(
+            self,
+            interaction: discord.Interaction,
+            channel: discord.TextChannel
+    ):
+        await interaction.response.defer(ephemeral=True)
+        with SessionLocal() as db:
+            try:
+                update_result = update_alert_channel(
+                    db, interaction.guild.id, channel.id
+                )
+
+                if not update_result:
+                    await interaction_followup(interaction, "알림 채널 설정에 실패했습니다.")
+                    return
+
+                db.commit()
+                
+                # 알림 Cog 가져오기
+                alert_cog = self.bot.get_cog("AlertCog")
+                if alert_cog:
+                    # 알림 채널 초기화
+                    await alert_cog.initialize_alert_channel(channel.id)
+                
+                await interaction_followup(interaction, f"알림 채널 {channel.mention} 설정완료.")
+
+            except Exception as e:
+                logger.error(f"알림 채널 설정 중 오류 발생: {str(e)}")
+                await interaction_followup(interaction, f"알림 채널 설정 중 오류가 발생했습니다: {str(e)}")
+
+    @set_alert_channel.error
+    async def alert_channel_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        """알림 채널 설정 중 오류 처리"""
+        if isinstance(error, app_commands.errors.MissingPermissions):
+            await interaction_response(interaction, "이 명령어는 관리자만 사용할 수 있습니다.")
+        else:
+            logger.error(f"알림 채널 설정 중 오류: {error}")
             await interaction_response(interaction, "명령어 실행 중 오류가 발생했습니다.")
 
 

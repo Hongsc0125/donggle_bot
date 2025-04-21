@@ -113,3 +113,29 @@ def select_voice_channel(db, guild_id):
         'guild_id': str(guild_id)
     }).fetchone()
     return row[0] if row and row[0] else None
+
+# 알림 채널 설정
+UPDATE_ALERT_CHANNEL = text("""
+    UPDATE guilds
+    SET alert_ch_id = :channel_id
+    , update_dt = now()
+    WHERE guild_id = :guild_id
+""")
+def update_alert_channel(db, guild_id, channel_id):
+    row = db.execute(UPDATE_ALERT_CHANNEL, {
+        'guild_id': str(guild_id),
+        'channel_id': str(channel_id)
+    })
+    return row.rowcount > 0
+
+# 알림 채널 조회
+SELECT_ALERT_CHANNEL = text("""
+    SELECT alert_ch_id
+    FROM guilds
+    WHERE guild_id = :guild_id
+""")
+def select_alert_channel(db, guild_id):
+    row = db.execute(SELECT_ALERT_CHANNEL, {
+        'guild_id': str(guild_id)
+    }).fetchone()
+    return row[0] if row and row[0] else None

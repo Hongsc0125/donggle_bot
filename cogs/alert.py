@@ -5,18 +5,21 @@ import logging
 import asyncio
 from datetime import datetime, timedelta
 import re
+import traceback
+from sqlalchemy import text
 
 from db.session import SessionLocal
 from core.utils import interaction_response, interaction_followup
 from queries.alert_query import (
     get_alert_list, get_user_alerts, add_user_alert, 
-    remove_user_alert, create_custom_alert, check_user_alert,
+    remove_user_alert, create_custom_alert,
     get_upcoming_alerts, check_alert_table_exists
 )
+from queries.channel_query import select_alert_channel
 
 logger = logging.getLogger(__name__)
 
-# Alert type display names
+# 알림 유형 표시 이름
 ALERT_TYPE_NAMES = {
     'boss': '보스', 
     'barrier': '결계', 
@@ -29,7 +32,7 @@ ALERT_TYPE_NAMES = {
     'sun': '일요일'
 }
 
-# Alert type emoji
+# 알림 유형 이모지
 ALERT_TYPE_EMOJI = {
     'boss': '👹', 
     'barrier': '🛡️', 
@@ -42,7 +45,7 @@ ALERT_TYPE_EMOJI = {
     'sun': '⚪'
 }
 
-# Day of week mapping
+# 요일 매핑
 DAY_OF_WEEK = {
     0: 'mon',
     1: 'tue',
@@ -281,6 +284,17 @@ class CustomAlertModal(discord.ui.Modal, title="커스텀 알림 등록"):
                 await interaction_followup(interaction, "❌ 커스텀 알림 등록 중 오류가 발생했습니다.")
                 db.rollback()
 
+class AlertRegisterButton(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)  # Persistent button with no timeout
+    
+    @discord.ui.button(label="알림등록", style=discord.ButtonStyle.primary, custom_id="alert_register")
+    async def register_alert(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """알림등록 버튼 처리"""
+        alert_cog = interaction.client.get_cog("AlertCog")
+        if alert_cog:
+            await alert_cog.show_alert_settings(interaction)
+
 class AlertCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -291,24 +305,106 @@ class AlertCog(commands.Cog):
     def cog_unload(self):
         self.check_alerts.cancel()
     
-    @app_commands.command(name="알림설정", description="보스, 결계, 요일 알림을 설정합니다")
-    async def alert_settings(self, interaction: discord.Interaction):
-        """알림 설정 명령어"""
-        logger.info(f"알림설정 명령어 호출: 사용자 {interaction.user.id}")
+    @commands.Cog.listener()
+    async def on_ready(self):
+        """봇이 준비되면 알림 채널 초기화"""
+        logger.info("알림 시스템 초기화 중...")
+        
         try:
-            logger.info(f"알림설정 명령어 시작: 사용자 {interaction.user.id}")
-            
             # Check if alert table exists
+            with SessionLocal() as db:
+                table_exists = check_alert_table_exists(db)
+                if not table_exists:
+                    logger.error("Alert table does not exist! Please run create_alert_tables.py to set up the tables.")
+                    return
+            
+            # 모든 길드의 알림 채널 초기화
+            for guild in self.bot.guilds:
+                with SessionLocal() as db:
+                    try:
+                        alert_channel_id = select_alert_channel(db, guild.id)
+                        if alert_channel_id:
+                            await self.initialize_alert_channel(alert_channel_id)
+                            logger.info(f"Guild {guild.id} alert channel {alert_channel_id} initialized")
+                        else:
+                            logger.info(f"Guild {guild.id} has no alert channel set")
+                    except Exception as e:
+                        logger.error(f"Error initializing alert channel for guild {guild.id}: {e}")
+            
+            logger.info("Alert system initialization complete")
+        except Exception as e:
+            logger.error(f"Error during alert system initialization: {e}")
+            logger.error(traceback.format_exc())
+    
+    async def initialize_alert_channel(self, channel_id):
+        """알림 채널 초기화 - 버튼 메시지 설정"""
+        channel = self.bot.get_channel(int(channel_id))
+        if not channel:
+            logger.warning(f"알림 채널 {channel_id}를 찾을 수 없습니다.")
+            return
+        
+        logger.info(f"알림 채널 {channel_id} 초기화 시작")
+        view = AlertRegisterButton()
+
+        instruction_embed = discord.Embed(
+            title="**알림 등록 버튼을 눌러주세요!**",
+            description="버튼이 동작을 안한다면 명령어를 입력해주세요.\n\n" +
+            "> **알림 설정 명령어** \n" +
+            "> `/알림설정`\n\n" +
+            "> **사용법**\n" +
+            "> 아래 버튼을 클릭하거나 `/알림설정` 명령어를 입력해서 알림을 설정하세요.",
+            color=discord.Color.blue()
+        )
+
+        # 기존 버튼이 있는지 확인
+        last_message = None
+        try:
+            async for message in channel.history(limit=50, oldest_first=False):
+                if (
+                    message.author.id == self.bot.user.id and
+                    message.components and
+                    any(
+                        any(
+                            hasattr(child, "custom_id") and child.custom_id == "alert_register"
+                            for child in (component.children if hasattr(component, "children") else [])
+                        )
+                        for component in message.components
+                    )
+                ):
+                    last_message = message
+                    break
+        except Exception as e:
+            logger.warning(f"채널 {channel_id} 메시지 조회 실패: {str(e)}")
+
+        # 기존 버튼이 있으면 업데이트, 없으면 새로 생성
+        if last_message:
+            try:
+                await last_message.edit(embed=instruction_embed, view=view)
+                logger.info(f"알림 채널 {channel_id} 기존 버튼 메시지 업데이트 완료")
+            except Exception as e:
+                logger.warning(f"알림 채널 {channel_id} 버튼 갱신 실패: {str(e)}")
+        else:
+            try:
+                await channel.send(embed=instruction_embed, view=view)
+                logger.info(f"알림 채널 {channel_id} 새 버튼 메시지 생성 완료")
+            except Exception as e:
+                logger.warning(f"알림 채널 {channel_id}에 버튼 메시지 전송 실패: {str(e)}")
+    
+    async def show_alert_settings(self, interaction: discord.Interaction):
+        """알림 설정 UI를 표시"""
+        logger.info(f"알림설정 UI 표시: 사용자 {interaction.user.id}")
+        try:
+            # 기존 알림설정 함수와 동일한 로직 사용
             with SessionLocal() as db:
                 table_exists = check_alert_table_exists(db)
                 if not table_exists:
                     logger.error("Alert table does not exist!")
                     await interaction_response(interaction, 
-                                              "알림 시스템 테이블이 존재하지 않습니다. 관리자에게 문의하세요.", 
-                                              ephemeral=True)
+                                             "알림 시스템 테이블이 존재하지 않습니다. 관리자에게 문의하세요.", 
+                                             ephemeral=True)
                     return
-                    
-            # Create embed with current alert settings
+            
+            # 기존 알림설정 로직 재사용
             embed = discord.Embed(
                 title="⏰ 알림 설정",
                 description="원하는 알림을 선택하세요. 알림은 DM으로 발송됩니다.",
@@ -367,8 +463,7 @@ class AlertCog(commands.Cog):
                 logger.info("알림 뷰 생성 성공")
             except Exception as e:
                 logger.error(f"알림 뷰 생성 중 오류: {str(e)}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
+                logger.error(traceback.format_exc())
                 await interaction_response(interaction, 
                                          f"알림 설정 UI 생성 중 오류가 발생했습니다. 관리자에게 문의하세요.", 
                                          ephemeral=True)
@@ -378,11 +473,29 @@ class AlertCog(commands.Cog):
             logger.info("알림설정 UI 전송 완료")
             
         except Exception as e:
-            logger.error(f"알림 설정 명령어 처리 중 오류: {str(e)}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            await interaction_response(interaction, "명령어 처리 중 오류가 발생했습니다.", ephemeral=True)
+            logger.error(f"알림 설정 UI 표시 중 오류: {str(e)}")
+            logger.error(traceback.format_exc())
+            await interaction_response(interaction, "알림 설정 처리 중 오류가 발생했습니다.", ephemeral=True)
     
+    @app_commands.command(name="알림설정", description="보스, 결계, 요일 알림을 설정합니다")
+    async def alert_settings(self, interaction: discord.Interaction):
+        """알림 설정 명령어"""
+        logger.info(f"알림설정 명령어 호출: 사용자 {interaction.user.id}")
+        
+        # 지정된 알림 채널인지 확인
+        with SessionLocal() as db:
+            alert_channel_id = select_alert_channel(db, interaction.guild.id)
+            if alert_channel_id and str(interaction.channel_id) != str(alert_channel_id):
+                channel = interaction.guild.get_channel(int(alert_channel_id))
+                if channel:
+                    await interaction_response(interaction, 
+                                             f"이 명령어는 {channel.mention} 채널에서만 사용할 수 있습니다.", 
+                                             ephemeral=True)
+                    return
+        
+        # 기존 알림설정 로직 호출
+        await self.show_alert_settings(interaction)
+
     @tasks.loop(minutes=1)
     async def check_alerts(self):
         """Check for alerts every minute"""
