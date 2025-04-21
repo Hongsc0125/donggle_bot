@@ -39,7 +39,8 @@ class Donggle(commands.Bot):
         extensions = [
             "cogs.channel",
             "cogs.recruitment",
-            "cogs.voice_channel"
+            "cogs.voice_channel",
+            "cogs.alert"  # Add the new alert cog
         ]
         for ext in extensions:
             try:
