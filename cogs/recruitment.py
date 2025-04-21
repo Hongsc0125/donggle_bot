@@ -24,6 +24,14 @@ class RecruitmentCog(commands.Cog):
         try:
             # 파티모집버튼과 완전히 동일한 로직 사용
             db = SessionLocal()
+
+            # 등록채널인지 여부 조회
+            channel_id = interaction.channel_id
+            regist_channel = select_recruitment_channel(db)
+            if not any(int(row[0]) == channel_id for row in regist_channel):
+                await interaction_response(interaction, "등록 채널이 아닙니다.", ephemeral=True)
+                return
+
             rows: List[DungeonRow] = select_dungeon(db)
             max_person_settings = select_max_person_setting(db)
             db.close()

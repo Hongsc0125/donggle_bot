@@ -255,4 +255,4 @@ class VoiceChannelCog(commands.Cog):
 
 # Cog를 등록하는 설정 함수
 async def setup(bot):
-    await bot.add_cog(VoiceChannelCog(bot)) 
+    await bot.add_cog(VoiceChannelCog(bot))
