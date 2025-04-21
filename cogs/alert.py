@@ -56,42 +56,67 @@ DAY_OF_WEEK = {
     6: 'sun'
 }
 
+# 한글->영어 변환용 매핑
+INTERVAL_MAPPING = {
+    "매일": "day", 
+    "매주": "week", 
+    "day": "day", 
+    "week": "week"
+}
+
+DAY_MAPPING = {
+    "월": "mon", 
+    "화": "tue", 
+    "수": "wed", 
+    "목": "thu", 
+    "금": "fri", 
+    "토": "sat", 
+    "일": "sun",
+    "mon": "mon", 
+    "tue": "tue", 
+    "wed": "wed", 
+    "thu": "thu",
+    "fri": "fri", 
+    "sat": "sat", 
+    "sun": "sun"
+}
+
 class AlertView(discord.ui.View):
     def __init__(self, user_id):
-        super().__init__(timeout=300)  # 5 minute timeout
+        super().__init__(timeout=300)  # 5분 타임아웃
         self.user_id = user_id
         
-        # Assign specific rows to each component
+        # 각 컴포넌트를 특정 행에 배치
         boss_select = AlertSelect('boss', '보스 알림 🔔', user_id)
-        boss_select.row = 0  # First row
+        boss_select.row = 0  # 첫 번째 행
         self.add_item(boss_select)
         
         barrier_select = AlertSelect('barrier', '결계 알림 🛡️', user_id)
-        barrier_select.row = 1  # Second row
+        barrier_select.row = 1  # 두 번째 행
         self.add_item(barrier_select)
         
         day_select = DaySelect(user_id)
-        day_select.row = 2  # Third row
+        day_select.row = 2  # 세 번째 행
         self.add_item(day_select)
         
         custom_btn = CustomAlertButton()
-        custom_btn.row = 3  # Fourth row
+        custom_btn.row = 3  # 네 번째 행
         self.add_item(custom_btn)
 
 class AlertSelect(discord.ui.Select):
     def __init__(self, alert_type, placeholder, user_id):
         self.alert_type = alert_type
-        self.user_id = user_id  # Store user_id as an instance variable
+        self.user_id = user_id  # 인스턴스 변수로 user_id 저장
         
         with SessionLocal() as db:
-            # Get alerts of this type
+            # 이 유형의 알림 가져오기
             alerts = get_alert_list(db, alert_type)
             
-            # Get user's selected alerts using the passed user_id
+            # 전달된 user_id를 사용하여 사용자 선택 알림 가져오기
             user_alerts = get_user_alerts(db, self.user_id)
             user_alert_ids = [alert['alert_id'] for alert in user_alerts]
             
-            # Create options
+            # 옵션 생성
             options = []
             for alert in alerts:
                 alert_time = alert['alert_time'].strftime('%H:%M')
@@ -117,20 +142,20 @@ class AlertSelect(discord.ui.Select):
         
         with SessionLocal() as db:
             try:
-                # Get current user alerts of this type
+                # 현재 사용자의 이 유형 알림 가져오기
                 user_alerts = get_user_alerts(db, interaction.user.id)
                 current_alert_ids = [alert['alert_id'] for alert in user_alerts 
                                     if alert['alert_type'] == self.alert_type]
                 
-                # Determine which alerts to add and which to remove
+                # 추가할 알림과 제거할 알림 결정
                 selected_alert_ids = self.values
                 
-                # Add new selections
+                # 새 선택 추가
                 for alert_id in selected_alert_ids:
                     if alert_id not in current_alert_ids:
                         add_user_alert(db, interaction.user.id, alert_id)
                 
-                # Remove deselected
+                # 선택 해제된 항목 제거
                 for alert_id in current_alert_ids:
                     if alert_id not in selected_alert_ids:
                         remove_user_alert(db, interaction.user.id, alert_id)
@@ -145,8 +170,8 @@ class AlertSelect(discord.ui.Select):
                 db.rollback()
 
 class DaySelect(discord.ui.Select):
-    def __init__(self, user_id=None):  # Add user_id parameter with default None
-        self.user_id = user_id  # Store the user_id
+    def __init__(self, user_id=None):  # 기본값이 None인 user_id 매개변수 추가
+        self.user_id = user_id  # user_id 저장
         options = []
         days = [
             ('mon', '월요일', '🔵'),
@@ -166,14 +191,14 @@ class DaySelect(discord.ui.Select):
             )
             options.append(option)
         
-        # If user_id is provided, pre-select current choices
+        # user_id가 제공된 경우 현재 선택 항목 미리 선택
         if user_id:
             with SessionLocal() as db:
                 user_alerts = get_user_alerts(db, user_id)
                 selected_days = [alert['alert_type'] for alert in user_alerts 
                                if alert['alert_type'] in ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']]
                 
-                # Update default state based on user's selections
+                # 사용자 선택에 따라 기본 상태 업데이트
                 for option in options:
                     option.default = option.value in selected_days
         
@@ -191,23 +216,23 @@ class DaySelect(discord.ui.Select):
             try:
                 selected_days = self.values
                 
-                # Get day alerts
+                # 요일 알림 가져오기
                 day_alerts = []
                 for day in ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']:
                     day_alerts.extend(get_alert_list(db, day))
                 
-                # Get user's selected day alerts
+                # 사용자가 선택한 요일 알림 가져오기
                 user_alerts = get_user_alerts(db, interaction.user.id)
                 current_day_alert_ids = [alert['alert_id'] for alert in user_alerts 
                                         if alert['alert_type'] in ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']]
                 
-                # Process each day alert
+                # 각 요일 알림 처리
                 for alert in day_alerts:
                     if alert['alert_type'] in selected_days and alert['alert_id'] not in current_day_alert_ids:
-                        # Add this day alert
+                        # 이 요일 알림 추가
                         add_user_alert(db, interaction.user.id, alert['alert_id'])
                     elif alert['alert_type'] not in selected_days and alert['alert_id'] in current_day_alert_ids:
-                        # Remove this day alert
+                        # 이 요일 알림 제거
                         remove_user_alert(db, interaction.user.id, alert['alert_id'])
                 
                 db.commit()
@@ -243,41 +268,71 @@ class CustomAlertModal(discord.ui.Modal, title="커스텀 알림 등록"):
     
     interval = discord.ui.TextInput(
         label="반복 주기",
-        placeholder="day(매일), week(매주)",
+        placeholder="매일, 매주 중 하나",
         required=True,
-        default="day"
+        default="매일"
+    )
+    
+    day_of_week = discord.ui.TextInput(
+        label="요일 (주기가 매주인 경우만 입력)",
+        placeholder="월, 화, 수, 목, 금, 토, 일 중 하나",
+        required=False
     )
     
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         
-        # Validate time format
+        # 시간 형식 검증
         time_pattern = re.compile(r'^([0-1][0-9]|2[0-3]):([0-5][0-9])$')
         if not time_pattern.match(self.alert_time.value):
             await interaction_followup(interaction, "❌ 시간 형식이 올바르지 않습니다. HH:MM 형식으로 입력해주세요.")
             return
         
-        # Validate interval
-        interval = self.interval.value.lower()
-        if interval not in ['day', 'week']:
-            await interaction_followup(interaction, "❌ 반복 주기는 'day' 또는 'week'으로 입력해주세요.")
+        # 주기 한글->영어 변환
+        interval_input = self.interval.value.strip()
+        interval = INTERVAL_MAPPING.get(interval_input)
+        if not interval:
+            await interaction_followup(interaction, "❌ 반복 주기는 '매일' 또는 '매주'로 입력해주세요.")
             return
+        
+        # 알림 타입 설정
+        alert_type = 'custom'
+        
+        # 주간 알림의 경우 요일 검증 및 알림 타입 업데이트
+        if interval == 'week':
+            # 요일 한글->영어 변환
+            day_input = self.day_of_week.value.strip() if self.day_of_week.value else ''
+            day = DAY_MAPPING.get(day_input)
+            
+            if not day:
+                await interaction_followup(interaction, "❌ 주간 알림의 경우 요일을 '월', '화', '수', '목', '금', '토', '일' 중 선택해주세요.")
+                return
+            
+            # 주간 알림의 경우 알림 타입을 "custom_[day]"로 설정
+            alert_type = f"custom_{day}"
         
         with SessionLocal() as db:
             try:
-                # Create custom alert
-                alert_id = create_custom_alert(db, self.alert_time.value, interval)
+                # 적절한 알림 타입으로 커스텀 알림 생성
+                alert_id = create_custom_alert(db, self.alert_time.value, interval, alert_type)
                 
                 if not alert_id:
                     await interaction_followup(interaction, "❌ 커스텀 알림 생성에 실패했습니다.")
                     return
                 
-                # Assign to user
+                # 사용자에게 할당
                 add_user_alert(db, interaction.user.id, alert_id)
                 
                 db.commit()
                 
-                await interaction_followup(interaction, f"✅ 커스텀 알림이 등록되었습니다: 매{interval} {self.alert_time.value}")
+                # 적절한 성공 메시지 생성
+                interval_display = "매일" if interval == "day" else "매주"
+                day_text = ""
+                if interval == 'week':
+                    day_name = ALERT_TYPE_NAMES.get(day, day)
+                    day_text = f" ({day_name})"
+                
+                await interaction_followup(interaction, f"✅ 커스텀 알림이 등록되었습니다: {interval_display}{day_text} {self.alert_time.value}")
                 
             except Exception as e:
                 logger.error(f"커스텀 알림 등록 중 오류: {str(e)}")
@@ -286,7 +341,7 @@ class CustomAlertModal(discord.ui.Modal, title="커스텀 알림 등록"):
 
 class AlertRegisterButton(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)  # Persistent button with no timeout
+        super().__init__(timeout=None)  # 시간 제한 없는 영구 버튼
     
     @discord.ui.button(label="알림등록", style=discord.ButtonStyle.primary, custom_id="alert_register")
     async def register_alert(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -299,8 +354,8 @@ class AlertCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.check_alerts.start()
-        self.last_sent_alerts = {}  # Track last sent alerts to avoid duplicates
-        logger.info("AlertCog initialized successfully")
+        self.last_sent_alerts = {}  # 중복 방지를 위해 마지막 전송 알림 추적
+        logger.info("AlertCog 초기화 완료")
     
     def cog_unload(self):
         self.check_alerts.cancel()
@@ -311,11 +366,11 @@ class AlertCog(commands.Cog):
         logger.info("알림 시스템 초기화 중...")
         
         try:
-            # Check if alert table exists
+            # 알림 테이블이 존재하는지 확인
             with SessionLocal() as db:
                 table_exists = check_alert_table_exists(db)
                 if not table_exists:
-                    logger.error("Alert table does not exist! Please run create_alert_tables.py to set up the tables.")
+                    logger.error("알림 테이블이 존재하지 않습니다! 테이블을 설정하려면 create_alert_tables.py를 실행하세요.")
                     return
             
             # 모든 길드의 알림 채널 초기화
@@ -325,15 +380,15 @@ class AlertCog(commands.Cog):
                         alert_channel_id = select_alert_channel(db, guild.id)
                         if alert_channel_id:
                             await self.initialize_alert_channel(alert_channel_id)
-                            logger.info(f"Guild {guild.id} alert channel {alert_channel_id} initialized")
+                            logger.info(f"길드 {guild.id} 알림 채널 {alert_channel_id} 초기화 완료")
                         else:
-                            logger.info(f"Guild {guild.id} has no alert channel set")
+                            logger.info(f"길드 {guild.id}에 설정된 알림 채널이 없습니다")
                     except Exception as e:
-                        logger.error(f"Error initializing alert channel for guild {guild.id}: {e}")
+                        logger.error(f"길드 {guild.id}의 알림 채널 초기화 중 오류: {e}")
             
-            logger.info("Alert system initialization complete")
+            logger.info("알림 시스템 초기화 완료")
         except Exception as e:
-            logger.error(f"Error during alert system initialization: {e}")
+            logger.error(f"알림 시스템 초기화 중 오류: {e}")
             logger.error(traceback.format_exc())
     
     async def initialize_alert_channel(self, channel_id):
@@ -394,24 +449,27 @@ class AlertCog(commands.Cog):
         """알림 설정 UI를 표시"""
         logger.info(f"알림설정 UI 표시: 사용자 {interaction.user.id}")
         try:
-            # 기존 알림설정 함수와 동일한 로직 사용
+            # 알림 테이블 존재 확인
             with SessionLocal() as db:
                 table_exists = check_alert_table_exists(db)
                 if not table_exists:
-                    logger.error("Alert table does not exist!")
+                    logger.error("알림 테이블이 존재하지 않습니다!")
                     await interaction_response(interaction, 
                                              "알림 시스템 테이블이 존재하지 않습니다. 관리자에게 문의하세요.", 
                                              ephemeral=True)
                     return
             
-            # 기존 알림설정 로직 재사용
+            # 알림 설정 임베드 생성
             embed = discord.Embed(
                 title="⏰ 알림 설정",
-                description="원하는 알림을 선택하세요. 알림은 DM으로 발송됩니다.\n 커스텀 알림 주기는 day, week 중 하나로 꼭 적어주세요.",
+                description="원하는 알림을 선택하세요. 알림은 DM으로 발송됩니다.\n\n" +
+                           "커스텀 알림 설정 시:\n" +
+                           "• 주기: '매일' 또는 '매주'\n" + 
+                           "• 주기가 '매주'인 경우 요일을 월~일 중에서 선택하세요.",
                 color=discord.Color.blue()
             )
             
-            # Get user's current alerts
+            # 사용자의 현재 알림 가져오기
             with SessionLocal() as db:
                 try:
                     user_alerts = get_user_alerts(db, interaction.user.id)
@@ -423,13 +481,13 @@ class AlertCog(commands.Cog):
                                              ephemeral=True)
                     return
             
-            # Group alerts by type
+            # 유형별로 알림 그룹화
             boss_alerts = [a for a in user_alerts if a['alert_type'] == 'boss']
             barrier_alerts = [a for a in user_alerts if a['alert_type'] == 'barrier']
             day_alerts = [a for a in user_alerts if a['alert_type'] in ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']]
-            custom_alerts = [a for a in user_alerts if a['alert_type'] == 'custom']
+            custom_alerts = [a for a in user_alerts if a['alert_type'] == 'custom' or a['alert_type'].startswith('custom_')]
             
-            # Add fields for each alert type
+            # 각 알림 유형에 대한 필드 추가
             if boss_alerts:
                 boss_times = ", ".join([a['alert_time'].strftime('%H:%M') for a in boss_alerts])
                 embed.add_field(name="👹 보스 알림", value=boss_times, inline=False)
@@ -449,15 +507,26 @@ class AlertCog(commands.Cog):
                 embed.add_field(name="📅 요일 알림", value=day_text, inline=False)
             
             if custom_alerts:
-                custom_times = ", ".join([f"{a['alert_time'].strftime('%H:%M')} ({a['interval']})" for a in custom_alerts])
-                embed.add_field(name="➕ 커스텀 알림", value=custom_times, inline=False)
+                custom_times = []
+                for a in custom_alerts:
+                    time_str = a['alert_time'].strftime('%H:%M')
+                    if a['alert_type'].startswith('custom_'):
+                        # custom_[day] 형식에서 day 코드 추출
+                        day_code = a['alert_type'][7:]  # "custom_" 접두사 제거
+                        day_name = ALERT_TYPE_NAMES.get(day_code, day_code)
+                        custom_times.append(f"{time_str} (매주 {day_name})")
+                    else:
+                        interval_display = "매일" if a['interval'] == "day" else "매주"
+                        custom_times.append(f"{time_str} ({interval_display})")
+                
+                embed.add_field(name="➕ 커스텀 알림", value=", ".join(custom_times), inline=False)
             
             if not any([boss_alerts, barrier_alerts, day_alerts, custom_alerts]):
                 embed.add_field(name="알림 없음", value="아래 버튼과 선택 메뉴를 사용하여 알림을 설정하세요.", inline=False)
             
             embed.set_footer(text="알림은 설정 시간 5분 전과 정각에 발송됩니다.")
             
-            # Create view with select menus
+            # 선택 메뉴가 있는 뷰 생성
             try:
                 view = AlertView(interaction.user.id)
                 logger.info("알림 뷰 생성 성공")
@@ -493,30 +562,30 @@ class AlertCog(commands.Cog):
                                              ephemeral=True)
                     return
         
-        # 기존 알림설정 로직 호출
+        # 알림 설정 UI 표시
         await self.show_alert_settings(interaction)
 
     @tasks.loop(minutes=1)
     async def check_alerts(self):
-        """Check for alerts every minute"""
+        """매분마다 알림을 확인합니다"""
         try:
             now = datetime.now()
             current_time = now.strftime('%H:%M:00')
             
-            # Get time for 5-minute warnings
+            # 5분 후 경고 알림 시간 계산
             warning_time = (now + timedelta(minutes=5)).strftime('%H:%M:00')
             
-            # Get current day of week
+            # 현재 요일 확인
             day_of_week = DAY_OF_WEEK[now.weekday()]
             
             with SessionLocal() as db:
-                # Check for exact time alerts
+                # 정각 알림 확인
                 exact_time_key = f"{current_time}-exact"
                 if exact_time_key not in self.last_sent_alerts or self.last_sent_alerts[exact_time_key] < now.date():
                     await self.send_alerts(db, current_time, day_of_week, is_warning=False)
                     self.last_sent_alerts[exact_time_key] = now.date()
                 
-                # Check for 5-minute warning alerts
+                # 5분 전 경고 알림 확인
                 warning_key = f"{warning_time}-warning"
                 if warning_key not in self.last_sent_alerts or self.last_sent_alerts[warning_key] < now.date():
                     await self.send_alerts(db, warning_time, day_of_week, is_warning=True)
@@ -527,19 +596,19 @@ class AlertCog(commands.Cog):
     
     @check_alerts.before_loop
     async def before_check_alerts(self):
-        """Wait until the bot is ready before starting the alert loop"""
+        """알림 루프를 시작하기 전에 봇이 준비될 때까지 대기"""
         await self.bot.wait_until_ready()
     
     async def send_alerts(self, db, alert_time, day_of_week, is_warning=False):
-        """Send alerts to users"""
+        """사용자에게 알림 전송"""
         try:
-            # Get alerts for the current time
+            # 현재 시간에 대한 알림 가져오기
             alerts = get_upcoming_alerts(db, alert_time, day_of_week)
             
             if not alerts:
                 return
             
-            # Group alerts by user
+            # 사용자별로 알림 그룹화
             user_alerts = {}
             for alert in alerts:
                 user_id = alert['user_id']
@@ -547,14 +616,14 @@ class AlertCog(commands.Cog):
                     user_alerts[user_id] = []
                 user_alerts[user_id].append(alert)
             
-            # Send DMs to users
+            # 사용자에게 DM 전송
             for user_id, user_alert_list in user_alerts.items():
                 try:
                     user = await self.bot.fetch_user(int(user_id))
                     if not user or user.bot:
                         continue
                     
-                    # Create embed for the alerts
+                    # 알림용 임베드 생성
                     embed = discord.Embed(
                         title="⏰ 알림" if not is_warning else "⚠️ 5분 전 알림",
                         description=f"{'알림 시간입니다!' if not is_warning else '5분 후 설정한 알림이 있습니다!'}",
@@ -562,7 +631,7 @@ class AlertCog(commands.Cog):
                         timestamp=datetime.now()
                     )
                     
-                    # Group alerts by type
+                    # 유형별로 알림 그룹화
                     alert_types = {}
                     for alert in user_alert_list:
                         alert_type = alert['alert_type']
@@ -570,9 +639,9 @@ class AlertCog(commands.Cog):
                             alert_types[alert_type] = []
                         alert_types[alert_type].append(alert)
                     
-                    # Add fields for each alert type
+                    # 각 알림 유형에 대한 필드 추가
                     for alert_type, alerts_of_type in alert_types.items():
-                        # Skip already processed alerts
+                        # 이미 처리된 알림 건너뛰기
                         if is_warning and self.was_alert_sent(alerts_of_type[0], user_id):
                             continue
                             
@@ -601,11 +670,11 @@ class AlertCog(commands.Cog):
             logger.error(f"알림 전송 중 오류: {str(e)}")
     
     def was_alert_sent(self, alert, user_id):
-        """Check if a specific alert was already sent today"""
+        """특정 알림이 오늘 이미 전송되었는지 확인"""
         alert_id = alert['alert_id']
         alert_key = f"{alert_id}-{user_id}"
         return alert_key in self.last_sent_alerts and self.last_sent_alerts[alert_key] == datetime.now().date()
 
-# Register the cog
+# Cog 등록
 async def setup(bot):
     await bot.add_cog(AlertCog(bot))

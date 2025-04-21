@@ -141,13 +141,14 @@ def remove_user_alert(db, user_id, alert_id):
 # Create custom alert
 CREATE_CUSTOM_ALERT = text("""
     INSERT INTO alert (alert_type, alert_time, interval)
-    VALUES ('custom', :alert_time, :interval)
+    VALUES (:alert_type, :alert_time, :interval)
     RETURNING alert_id
 """)
-def create_custom_alert(db, alert_time, interval='day'):
+def create_custom_alert(db, alert_time, interval='day', alert_type='custom'):
     row = db.execute(CREATE_CUSTOM_ALERT, {
         "alert_time": alert_time,
-        "interval": interval
+        "interval": interval,
+        "alert_type": alert_type
     }).fetchone()
     return row[0] if row else None
 
@@ -186,6 +187,7 @@ GET_UPCOMING_alert = text("""
         CASE 
             WHEN a.interval = 'day' THEN true
             WHEN a.interval = 'week' AND a.alert_type = :day_of_week THEN true
+            WHEN a.interval = 'week' AND a.alert_type = 'custom_' || :day_of_week THEN true
             ELSE false
         END
     AND a.alert_time = :alert_time
