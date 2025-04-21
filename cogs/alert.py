@@ -407,7 +407,7 @@ class AlertCog(commands.Cog):
             # 기존 알림설정 로직 재사용
             embed = discord.Embed(
                 title="⏰ 알림 설정",
-                description="원하는 알림을 선택하세요. 알림은 DM으로 발송됩니다.",
+                description="원하는 알림을 선택하세요. 알림은 DM으로 발송됩니다.\n 커스텀 알림 주기는 day, week 중 하나로 꼭 적어주세요.",
                 color=discord.Color.blue()
             )
             
