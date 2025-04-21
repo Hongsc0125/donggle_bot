@@ -339,6 +339,75 @@ class CustomAlertModal(discord.ui.Modal, title="커스텀 알림 등록"):
                 await interaction_followup(interaction, "❌ 커스텀 알림 등록 중 오류가 발생했습니다.")
                 db.rollback()
 
+class CustomAlertDeleteButton(discord.ui.Button):
+    def __init__(self, alert_id):
+        super().__init__(
+            style=discord.ButtonStyle.danger,
+            emoji="🗑️",
+            custom_id=f"delete_custom_alert_{alert_id}"
+        )
+        self.alert_id = alert_id
+    
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        
+        with SessionLocal() as db:
+            try:
+                # 사용자가 해당 알림을 등록했는지 확인
+                user_alerts = get_user_alerts(db, interaction.user.id)
+                alert_ids = [alert['alert_id'] for alert in user_alerts]
+                
+                if self.alert_id not in alert_ids:
+                    await interaction_followup(interaction, "❌ 해당 알림을 찾을 수 없습니다.")
+                    return
+                
+                # 사용자-알림 연결 삭제
+                remove_user_alert(db, interaction.user.id, self.alert_id)
+                
+                # 해당 알림을 사용하는 다른 사용자가 있는지 확인
+                from sqlalchemy import text
+                check_query = text("SELECT COUNT(*) FROM alert_user WHERE alert_id = :alert_id")
+                result = db.execute(check_query, {"alert_id": self.alert_id}).fetchone()
+                
+                # 다른 사용자가 없으면 알림 자체도 삭제
+                if result[0] == 0:
+                    from queries.alert_query import delete_custom_alert
+                    delete_custom_alert(db, self.alert_id)
+                
+                db.commit()
+                
+                # 삭제 성공 메시지 표시
+                await interaction_followup(interaction, "✅ 커스텀 알림이 삭제되었습니다.")
+                
+                # 메시지 삭제 시도 - 현재 메시지를 완전히 삭제
+                try:
+                    await interaction.message.delete()
+                except:
+                    pass
+                
+                # 새로운 상호작용으로 새 명령어 실행하도록 안내
+                await interaction_followup(interaction, "알림 설정이 변경되었습니다. `/알림설정` 명령어로 다시 설정 화면을 열어주세요.")
+                
+            except Exception as e:
+                logger.error(f"커스텀 알림 삭제 중 오류: {str(e)}")
+                await interaction_followup(interaction, "❌ 알림 삭제 중 오류가 발생했습니다.")
+                db.rollback()
+
+class CustomAlertView(discord.ui.View):
+    def __init__(self, custom_alerts, parent_cog):
+        super().__init__(timeout=180)
+        self.parent_cog = parent_cog
+        
+        if not custom_alerts:
+            # 커스텀 알림이 없는 경우 안내 메시지만 표시
+            return
+        
+        # 각 커스텀 알림에 대한 삭제 버튼 추가
+        for i, alert in enumerate(custom_alerts):
+            delete_btn = CustomAlertDeleteButton(alert['alert_id'])
+            delete_btn.row = i // 2  # 한 줄에 2개씩 표시
+            self.add_item(delete_btn)
+
 class AlertRegisterButton(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)  # 시간 제한 없는 영구 버튼
@@ -449,6 +518,14 @@ class AlertCog(commands.Cog):
         """알림 설정 UI를 표시"""
         logger.info(f"알림설정 UI 표시: 사용자 {interaction.user.id}")
         try:
+            # 이미 응답된 상호작용인지 확인
+            if interaction.response.is_done():
+                logger.info("이미 응답된 상호작용입니다. followup 메시지를 사용합니다.")
+                send_method = interaction.followup.send
+            else:
+                logger.info("새 상호작용 응답을 전송합니다.")
+                send_method = interaction.response.send_message
+            
             # 알림 테이블 존재 확인
             with SessionLocal() as db:
                 table_exists = check_alert_table_exists(db)
@@ -506,6 +583,7 @@ class AlertCog(commands.Cog):
                                     for day, times in day_values.items()])
                 embed.add_field(name="📅 요일 알림", value=day_text, inline=False)
             
+            # 커스텀 알림 섹션
             if custom_alerts:
                 custom_times = []
                 for a in custom_alerts:
@@ -519,32 +597,50 @@ class AlertCog(commands.Cog):
                         interval_display = "매일" if a['interval'] == "day" else "매주"
                         custom_times.append(f"{time_str} ({interval_display})")
                 
-                embed.add_field(name="➕ 커스텀 알림", value=", ".join(custom_times), inline=False)
+                # 커스텀 알림 정보 표시
+                embed.add_field(
+                    name="➕ 커스텀 알림",
+                    value=", ".join(custom_times) + "\n\n아래 버튼으로 커스텀 알림을 관리할 수 있습니다.",
+                    inline=False
+                )
             
             if not any([boss_alerts, barrier_alerts, day_alerts, custom_alerts]):
                 embed.add_field(name="알림 없음", value="아래 버튼과 선택 메뉴를 사용하여 알림을 설정하세요.", inline=False)
             
             embed.set_footer(text="알림은 설정 시간 5분 전과 정각에 발송됩니다.")
             
-            # 선택 메뉴가 있는 뷰 생성
-            try:
-                view = AlertView(interaction.user.id)
-                logger.info("알림 뷰 생성 성공")
-            except Exception as e:
-                logger.error(f"알림 뷰 생성 중 오류: {str(e)}")
-                logger.error(traceback.format_exc())
-                await interaction_response(interaction, 
-                                         f"알림 설정 UI 생성 중 오류가 발생했습니다. 관리자에게 문의하세요.", 
-                                         ephemeral=True)
-                return
+            # 기본 알림 선택용 뷰 생성
+            view = AlertView(interaction.user.id)
             
-            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            # 커스텀 알림 삭제 버튼 추가
+            for i, alert in enumerate(custom_alerts):
+                delete_btn = CustomAlertDeleteButton(alert['alert_id'])
+                # 알림 정보 표시
+                if alert['alert_type'].startswith('custom_'):
+                    day_code = alert['alert_type'][7:]
+                    day_name = ALERT_TYPE_NAMES.get(day_code, day_code)
+                    time_display = f"{alert['alert_time'].strftime('%H:%M')} (매주 {day_name})"
+                else:
+                    interval_display = "매일" if alert['interval'] == "day" else "매주"
+                    time_display = f"{alert['alert_time'].strftime('%H:%M')} ({interval_display})"
+                    
+                delete_btn.label = f"삭제: {time_display}"
+                delete_btn.row = 4 + (i // 2)  # 한 줄에 두 개씩 배치
+                view.add_item(delete_btn)
+            
+            # 메시지 전송 (적절한 메서드 사용)
+            await send_method(embed=embed, view=view, ephemeral=True)
             logger.info("알림설정 UI 전송 완료")
             
+        except discord.errors.InteractionResponded:
+            logger.warning("이미 응답된 상호작용입니다. 새 명령어를 실행하도록 유도합니다.")
         except Exception as e:
             logger.error(f"알림 설정 UI 표시 중 오류: {str(e)}")
             logger.error(traceback.format_exc())
-            await interaction_response(interaction, "알림 설정 처리 중 오류가 발생했습니다.", ephemeral=True)
+            if not interaction.response.is_done():
+                await interaction_response(interaction, "알림 설정 처리 중 오류가 발생했습니다.", ephemeral=True)
+            else:
+                await interaction_followup(interaction, "알림 설정 처리 중 오류가 발생했습니다.")
     
     @app_commands.command(name="알림설정", description="보스, 결계, 요일 알림을 설정합니다")
     async def alert_settings(self, interaction: discord.Interaction):
