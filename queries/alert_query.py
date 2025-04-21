@@ -10,7 +10,12 @@ ALERT_lIST = text("""
       AND alert_type = :alert_type
 """)
 def get_alert_list(db, guild_id, alert_type):
-    return db.execute(ALERT_lIST, {
+    list = db.execute(ALERT_lIST, {
         "guild_id": str(guild_id),
         "alert_type": alert_type
     }).fetchall()
+    return[{
+        'interval': row[0],
+        'alert_type': row[1],
+        'alert_time': row[2]
+    } for row in list]
