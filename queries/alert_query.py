@@ -153,6 +153,24 @@ def create_custom_alert(db, alert_time, interval='day', alert_type='custom'):
     return row[0] if row else None
 
 
+# Delete custom alert
+DELETE_CUSTOM_ALERT = text("""
+    DELETE FROM alert
+    WHERE alert_id = :alert_id
+    AND (alert_type = 'custom' OR alert_type LIKE 'custom_%')
+    RETURNING alert_id
+""")
+def delete_custom_alert(db, alert_id):
+    try:
+        row = db.execute(DELETE_CUSTOM_ALERT, {
+            "alert_id": alert_id
+        }).fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        logger.error(f"Error deleting custom alert: {e}")
+        return None
+
+
 # Get alert by time (for notification sending)
 GET_alert_BY_TIME = text("""
     SELECT a.alert_id, a.alert_type, a.alert_time, a.interval, au.user_id
