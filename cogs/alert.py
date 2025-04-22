@@ -86,6 +86,12 @@ class AlertView(discord.ui.View):
         super().__init__(timeout=300)  # 5분 타임아웃
         self.user_id = user_id
         
+        # 커스텀 알림 개수 확인 (추가)
+        with SessionLocal() as db:
+            user_alerts = get_user_alerts(db, user_id)
+            custom_alerts = [a for a in user_alerts if a['alert_type'] == 'custom' or a['alert_type'].startswith('custom_')]
+            custom_alert_count = len(custom_alerts)
+        
         # 각 컴포넌트를 특정 행에 배치
         boss_select = AlertSelect('boss', '보스 알림 🔔', user_id)
         boss_select.row = 0  # 첫 번째 행
@@ -99,7 +105,9 @@ class AlertView(discord.ui.View):
         day_select.row = 2  # 세 번째 행
         self.add_item(day_select)
         
+        # 커스텀 알림 버튼 - 2개 제한 로직 적용
         custom_btn = CustomAlertButton()
+        custom_btn.disabled = custom_alert_count >= 2  # 2개 이상이면 버튼 비활성화
         custom_btn.row = 3  # 네 번째 행
         self.add_item(custom_btn)
 
@@ -281,6 +289,15 @@ class CustomAlertModal(discord.ui.Modal, title="커스텀 알림 등록"):
     
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
+        
+        # 사용자가 이미 등록한 커스텀 알림 개수 확인
+        with SessionLocal() as db:
+            user_alerts = get_user_alerts(db, interaction.user.id)
+            custom_alerts = [a for a in user_alerts if a['alert_type'] == 'custom' or a['alert_type'].startswith('custom_')]
+            
+            if len(custom_alerts) >= 2:
+                await interaction_followup(interaction, "❌ 커스텀 알림은 최대 2개까지만 등록할 수 있습니다.")
+                return
         
         # 시간 형식 검증
         time_pattern = re.compile(r'^([0-1][0-9]|2[0-3]):([0-5][0-9])$')
@@ -597,10 +614,10 @@ class AlertCog(commands.Cog):
                         interval_display = "매일" if a['interval'] == "day" else "매주"
                         custom_times.append(f"{time_str} ({interval_display})")
                 
-                # 커스텀 알림 정보 표시
+                # 커스텀 알림 정보 표시 (제한 표시 추가)
                 embed.add_field(
                     name="➕ 커스텀 알림",
-                    value=", ".join(custom_times) + "\n\n아래 버튼으로 커스텀 알림을 관리할 수 있습니다.",
+                    value=", ".join(custom_times) + f"\n\n아래 버튼으로 커스텀 알림을 관리할 수 있습니다.\n(최대 2개까지 등록 가능, 현재 {len(custom_alerts)}/2개)",
                     inline=False
                 )
             
