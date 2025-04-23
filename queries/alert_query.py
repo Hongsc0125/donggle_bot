@@ -245,3 +245,51 @@ def add_deep_alert_user(db, user_id, guild_id, user_name):
     except Exception as e:
         logger.error(f"Error adding deep user: {e}")
         return None
+
+# 심층 알림 받을 사용자 조회
+SELECT_DEEP_ALERT_USERS = text("""
+    SELECT user_id, guild_id, user_name
+    FROM deep_alert_user
+    WHERE guild_id = :guild_id
+""")
+def select_deep_alert_users(db, guild_id):
+    rows = db.execute(SELECT_DEEP_ALERT_USERS, {
+        'guild_id': str(guild_id)
+    }).fetchall()
+    return [{'user_id': row[0], 'guild_id': row[1], 'user_name': row[2]} for row in rows]
+
+# 심층 알림 사용자 확인
+CHECK_DEEP_ALERT_USER = text("""
+    SELECT COUNT(*)
+    FROM deep_alert_user
+    WHERE user_id = :user_id
+    AND guild_id = :guild_id
+""")
+def check_deep_alert_user(db, user_id, guild_id):
+    try:
+        row = db.execute(CHECK_DEEP_ALERT_USER, {
+            "user_id": str(user_id),
+            "guild_id": str(guild_id)
+        }).fetchone()
+        return row[0] > 0 if row else False
+    except Exception as e:
+        logger.error(f"Error checking deep alert user: {e}")
+        return False
+
+# 심층 알림 사용자 삭제
+REMOVE_DEEP_ALERT_USER = text("""
+    DELETE FROM deep_alert_user
+    WHERE user_id = :user_id
+    AND guild_id = :guild_id
+    RETURNING user_id
+""")
+def remove_deep_alert_user(db, user_id, guild_id):
+    try:
+        row = db.execute(REMOVE_DEEP_ALERT_USER, {
+            "user_id": str(user_id),
+            "guild_id": str(guild_id)
+        }).fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        logger.error(f"Error removing deep alert user: {e}")
+        return None

@@ -13,7 +13,9 @@ from core.utils import interaction_response, interaction_followup
 from queries.alert_query import (
     get_alert_list, get_user_alerts, add_user_alert, 
     remove_user_alert, create_custom_alert,
-    get_upcoming_alerts, check_alert_table_exists
+    get_upcoming_alerts, check_alert_table_exists,
+    check_deep_alert_user, remove_deep_alert_user,
+    add_deep_alert_user, select_deep_alert_users
 )
 from queries.channel_query import select_alert_channel
 
@@ -82,7 +84,7 @@ DAY_MAPPING = {
 }
 
 class AlertView(discord.ui.View):
-    def __init__(self, user_id):
+    def __init__(self, user_id, bot):
         super().__init__(timeout=300)  # 5분 타임아웃
         self.user_id = user_id
         
@@ -91,6 +93,17 @@ class AlertView(discord.ui.View):
             user_alerts = get_user_alerts(db, user_id)
             custom_alerts = [a for a in user_alerts if a['alert_type'] == 'custom' or a['alert_type'].startswith('custom_')]
             custom_alert_count = len(custom_alerts)
+            
+            # 심층 알림 활성화 여부 확인
+            guild_id = None
+            if bot:
+                for guild in bot.guilds:
+                    member = guild.get_member(int(user_id))
+                    if member:
+                        guild_id = guild.id
+                        break
+            
+            is_deep_alert_on = check_deep_alert_user(db, user_id, guild_id) if guild_id else False
         
         # 각 컴포넌트를 특정 행에 배치
         boss_select = AlertSelect('boss', '보스 알림 🔔', user_id)
@@ -105,10 +118,15 @@ class AlertView(discord.ui.View):
         day_select.row = 2  # 세 번째 행
         self.add_item(day_select)
         
+        # 심층 알림 토글 버튼 추가
+        deep_btn = DeepAlertToggleButton(is_deep_alert_on)
+        deep_btn.row = 3  # 네 번째 행
+        self.add_item(deep_btn)
+        
         # 커스텀 알림 버튼 - 2개 제한 로직 적용
         custom_btn = CustomAlertButton()
         custom_btn.disabled = custom_alert_count >= 2  # 2개 이상이면 버튼 비활성화
-        custom_btn.row = 3  # 네 번째 행
+        custom_btn.row = 4  # 다섯 번째 행
         self.add_item(custom_btn)
 
 class AlertSelect(discord.ui.Select):
@@ -131,7 +149,7 @@ class AlertSelect(discord.ui.Select):
                 emoji = ALERT_TYPE_EMOJI.get(alert_type, '🔔')
                 option = discord.SelectOption(
                     label=f"{ALERT_TYPE_NAMES.get(alert_type, alert_type)} {alert_time}",
-                    value=alert['alert_id'],
+                    value=str(alert['alert_id']),
                     description=f"{alert['interval']}마다 {alert_time}에 알림",
                     emoji=emoji,
                     default=alert['alert_id'] in user_alert_ids
@@ -156,7 +174,7 @@ class AlertSelect(discord.ui.Select):
                                     if alert['alert_type'] == self.alert_type]
                 
                 # 추가할 알림과 제거할 알림 결정
-                selected_alert_ids = self.values
+                selected_alert_ids = [int(alert_id) for alert_id in self.values]
                 
                 # 새 선택 추가
                 for alert_id in selected_alert_ids:
@@ -259,7 +277,7 @@ class CustomAlertButton(discord.ui.Button):
             style=discord.ButtonStyle.primary,
             label="커스텀 알림 추가",
             emoji="➕",
-            row=3
+            row=4
         )
     
     async def callback(self, interaction: discord.Interaction):
@@ -436,6 +454,60 @@ class AlertRegisterButton(discord.ui.View):
         if alert_cog:
             await alert_cog.show_alert_settings(interaction)
 
+# 심층 알림 토글 버튼 클래스 추가
+class DeepAlertToggleButton(discord.ui.Button):
+    def __init__(self, is_on=False):
+        super().__init__(
+            style=discord.ButtonStyle.success if is_on else discord.ButtonStyle.secondary,
+            label="심층 알림 ON" if is_on else "심층 알림 OFF",
+            emoji="🧊" if is_on else "🔕",
+            row=3
+        )
+        self.is_on = is_on
+    
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        
+        with SessionLocal() as db:
+            try:
+                # 현재 상태 확인
+                user_id = interaction.user.id
+                guild_id = interaction.guild.id
+                
+                if self.is_on:
+                    # 알림 제거
+                    result = remove_deep_alert_user(db, user_id, guild_id)
+                    if result:
+                        self.is_on = False
+                        self.style = discord.ButtonStyle.secondary
+                        self.label = "심층 알림 OFF"
+                        self.emoji = "🔕"
+                        message = "심층 알림이 비활성화되었습니다."
+                    else:
+                        message = "심층 알림 비활성화에 실패했습니다."
+                else:
+                    # 알림 추가
+                    result = add_deep_alert_user(db, user_id, guild_id, interaction.user.display_name)
+                    if result:
+                        self.is_on = True
+                        self.style = discord.ButtonStyle.success
+                        self.label = "심층 알림 ON"
+                        self.emoji = "🧊"
+                        message = "심층 알림이 활성화되었습니다. 심층 제보가 있을 때 DM으로 알림을 받습니다."
+                    else:
+                        message = "심층 알림 활성화에 실패했습니다."
+                
+                db.commit()
+                await interaction_followup(interaction, message)
+                
+                # 뷰 업데이트
+                await interaction.message.edit(view=self.view)
+                
+            except Exception as e:
+                logger.error(f"심층 알림 토글 중 오류: {str(e)}")
+                await interaction_followup(interaction, "설정 변경 중 오류가 발생했습니다.")
+                db.rollback()
+
 class AlertCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -552,6 +624,9 @@ class AlertCog(commands.Cog):
                                              "알림 시스템 테이블이 존재하지 않습니다. 관리자에게 문의하세요.", 
                                              ephemeral=True)
                     return
+                
+                # 심층 알림 상태 확인
+                is_deep_alert_on = check_deep_alert_user(db, interaction.user.id, interaction.guild.id)
             
             # 알림 설정 임베드 생성
             embed = discord.Embed(
@@ -621,13 +696,20 @@ class AlertCog(commands.Cog):
                     inline=False
                 )
             
+            # 심층 알림 상태 표시
+            embed.add_field(
+                name="🧊 심층 알림",
+                value="활성화됨" if is_deep_alert_on else "비활성화됨",
+                inline=False
+            )
+            
             if not any([boss_alerts, barrier_alerts, day_alerts, custom_alerts]):
                 embed.add_field(name="알림 없음", value="아래 버튼과 선택 메뉴를 사용하여 알림을 설정하세요.", inline=False)
             
             embed.set_footer(text="알림은 설정 시간 5분 전과 정각에 발송됩니다.")
             
             # 기본 알림 선택용 뷰 생성
-            view = AlertView(interaction.user.id)
+            view = AlertView(interaction.user.id, self.bot)
             
             # 커스텀 알림 삭제 버튼 추가
             for i, alert in enumerate(custom_alerts):

@@ -40,6 +40,7 @@ class Donggle(commands.Bot):
             "cogs.channel",
             "cogs.recruitment",
             "cogs.voice_channel",
+            "cogs.deep",
             "cogs.alert"
         ]
         for ext in extensions:

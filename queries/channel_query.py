@@ -131,6 +131,18 @@ def select_voice_channel(db, guild_id):
     }).fetchone()
     return row[0] if row and row[0] else None
 
+# 심층 채널 조회
+SELECT_DEEP_CHANNEL = text("""
+    SELECT deep_ch_id
+    FROM guilds
+    WHERE guild_id = :guild_id
+""")
+def select_deep_channel(db, guild_id):
+    row = db.execute(SELECT_DEEP_CHANNEL, {
+        'guild_id': str(guild_id)
+    }).fetchone()
+    return row[0] if row and row[0] else None
+
 # 알림 채널 설정
 UPDATE_ALERT_CHANNEL = text("""
     UPDATE guilds
