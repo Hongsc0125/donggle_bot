@@ -297,3 +297,197 @@ def remove_deep_alert_user(db, user_id, guild_id):
     except Exception as e:
         logger.error(f"Error removing deep alert user: {e}")
         return None
+
+# 심층 제보자 정보 저장
+INSERT_DEEP_INFORMANT = text("""
+    INSERT INTO informant_deep_user(
+        user_id
+        , user_name
+        , guild_id
+        , guild_name
+        , deep_type
+        , remaining_minutes
+    ) VALUES (
+        :user_id
+        , :user_name
+        , :guild_id
+        , :guild_name
+        , :deep_type
+        , :remaining_minutes
+    )
+    RETURNING deep_id
+""")
+def insert_deep_informant(db, user_id, user_name, guild_id, guild_name, deep_type, remaining_minutes):
+    try:
+        row = db.execute(INSERT_DEEP_INFORMANT, {
+            "user_id": str(user_id),
+            "user_name": str(user_name),
+            "guild_id": str(guild_id),
+            "guild_name": str(guild_name),
+            "deep_type": str(deep_type),
+            "remaining_minutes": remaining_minutes
+        }).fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        logger.error(f"Error adding deep informant: {e}")
+        return None
+
+# 심층 제보 신고 추가
+INSERT_DEEP_ERROR = text("""
+    INSERT INTO error_deep_info(
+        deep_id
+        , report_user_id
+        , report_user_name
+        , reason
+    ) VALUES (
+        :deep_id
+        , :report_user_id
+        , :report_user_name
+        , :reason
+    )
+    ON CONFLICT (deep_id, report_user_id) DO NOTHING
+    RETURNING deep_id
+""")
+def insert_deep_error(db, deep_id, report_user_id, report_user_name, reason=None):
+    try:
+        row = db.execute(INSERT_DEEP_ERROR, {
+            "deep_id": deep_id,
+            "report_user_id": str(report_user_id),
+            "report_user_name": str(report_user_name),
+            "reason": reason
+        }).fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        logger.error(f"Error adding deep error report: {e}")
+        return None
+
+# 심층 제보 신고 횟수 확인
+COUNT_DEEP_ERROR = text("""
+    SELECT COUNT(*)
+    FROM error_deep_info
+    WHERE deep_id = :deep_id
+""")
+def count_deep_error(db, deep_id):
+    try:
+        row = db.execute(COUNT_DEEP_ERROR, {
+            "deep_id": deep_id
+        }).fetchone()
+        return row[0] if row else 0
+    except Exception as e:
+        logger.error(f"Error counting deep error reports: {e}")
+        return 0
+
+# 심층 제보 error 표시 업데이트 
+UPDATE_DEEP_ERROR = text("""
+    UPDATE informant_deep_user
+    SET is_error = 'Y'
+    WHERE deep_id = :deep_id
+    RETURNING deep_id
+""")
+def update_deep_error(db, deep_id):
+    try:
+        row = db.execute(UPDATE_DEEP_ERROR, {
+            "deep_id": deep_id
+        }).fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        logger.error(f"Error updating deep error status: {e}")
+        return None
+
+# 유저의 기존 신고 여부 확인
+CHECK_USER_DEEP_ERROR = text("""
+    SELECT COUNT(*)
+    FROM error_deep_info
+    WHERE deep_id = :deep_id
+    AND report_user_id = :report_user_id
+""")
+def check_user_deep_error(db, deep_id, report_user_id):
+    try:
+        row = db.execute(CHECK_USER_DEEP_ERROR, {
+            "deep_id": deep_id,
+            "report_user_id": str(report_user_id)
+        }).fetchone()
+        return row[0] > 0 if row else False
+    except Exception as e:
+        logger.error(f"Error checking user deep error report: {e}")
+        return False
+
+# 심층 최근 등록 조회 - 동일 위치의 아직 시간이 지나지 않은 정보
+CHECK_RECENT_DEEP = text("""
+    SELECT deep_id, remaining_minutes 
+    FROM informant_deep_user
+    WHERE deep_type = :deep_type
+    AND guild_id = :guild_id
+    AND is_error = 'N'
+    AND create_dt > NOW() - (INTERVAL '1 minute' * :remaining_minutes)
+    ORDER BY create_dt DESC
+    LIMIT 1
+""")
+def check_recent_deep(db, deep_type, guild_id, remaining_minutes):
+    try:
+        row = db.execute(CHECK_RECENT_DEEP, {
+            "deep_type": deep_type,
+            "guild_id": str(guild_id),
+            "remaining_minutes": remaining_minutes
+        }).fetchone()
+        return {
+            "deep_id": row[0],
+            "remaining_minutes": row[1]
+        } if row else None
+    except Exception as e:
+        logger.error(f"Error checking recent deep: {e}")
+        return None
+
+# 메시지 ID 업데이트
+UPDATE_DEEP_MESSAGE_ID = text("""
+    UPDATE informant_deep_user
+    SET message_id = :message_id
+    WHERE deep_id = :deep_id
+    RETURNING deep_id
+""")
+def update_deep_message_id(db, deep_id, message_id):
+    try:
+        row = db.execute(UPDATE_DEEP_MESSAGE_ID, {
+            "deep_id": deep_id,
+            "message_id": str(message_id)
+        }).fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        logger.error(f"Error updating deep message id: {e}")
+        return None
+
+# 오류로 표시된 심층 제보 ID 목록 조회
+SELECT_ERROR_DEEP_IDS = text("""
+    SELECT deep_id, message_id
+    FROM informant_deep_user
+    WHERE is_error = 'Y'
+""")
+def select_error_deep_ids(db):
+    try:
+        rows = db.execute(SELECT_ERROR_DEEP_IDS).fetchall()
+        return [(row[0], row[1]) for row in rows] if rows else []
+    except Exception as e:
+        logger.error(f"Error selecting error deep ids: {e}")
+        return []
+
+# 모든 심층 제보 조회
+SELECT_ALL_DEEP_REPORTS = text("""
+    SELECT deep_id, deep_type, create_dt, remaining_minutes, is_error
+    FROM informant_deep_user
+    WHERE guild_id = :guild_id
+""")
+def select_all_deep_reports(db, guild_id):
+    try:
+        rows = db.execute(SELECT_ALL_DEEP_REPORTS, {
+            "guild_id": str(guild_id)
+        }).fetchall()
+        return [{
+            "deep_id": row[0],
+            "deep_type": row[1],
+            "create_dt": row[2],
+            "remaining_minutes": row[3],
+            "is_error": row[4]
+        } for row in rows] if rows else []
+    except Exception as e:
+        logger.error(f"Error selecting all deep reports: {e}")
+        return []
