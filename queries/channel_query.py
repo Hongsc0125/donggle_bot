@@ -74,6 +74,23 @@ def select_super_user(db):
     row = db.execute(SELECT_SUPER_USER).fetchall()
     return [user[0] for user in row] if row else None
 
+
+
+UPDATE_DEEP_CHANNEL = text("""
+            UPDATE guilds 
+            SET deep_ch_id = :channel_id 
+                , update_dt = now()
+            WHERE guild_id = :guild_id
+""")
+def update_deep_channel(db, guild_id, channel_id):
+    """길드의 심층 채널 ID를 업데이트합니다."""
+    result = db.execute(
+        UPDATE_DEEP_CHANNEL,
+        {"guild_id": str(guild_id), "channel_id": str(channel_id)}
+    )
+    return result.rowcount > 0
+
+
 # 비밀스레드 부모채널 설정
 UPDATE_THREAD_CHANNEL = text("""
     UPDATE guilds

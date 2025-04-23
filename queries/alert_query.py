@@ -222,3 +222,26 @@ def get_upcoming_alerts(db, alert_time, day_of_week):
         'interval': row[3],
         'user_id': row[4]
     } for row in list]
+
+ADD_DEEP_ALERT_USER = text("""
+    INSERT INTO deep_alert_user(
+        user_id
+        , guild_id
+        , user_name
+    ) VALUES (
+        :user_id
+        , :guild_id
+        , :user_name
+    ) RETURNING user_id, guild_id
+""")
+def add_deep_alert_user(db, user_id, guild_id, user_name):
+    try:
+        row = db.execute(ADD_DEEP_ALERT_USER, {
+            "user_id": str(user_id),
+            "guild_id": str(guild_id),
+            "user_name": str(user_name)
+        }).fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        logger.error(f"Error adding deep user: {e}")
+        return None

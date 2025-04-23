@@ -6,7 +6,11 @@ from datetime import datetime
 
 from db.session import SessionLocal
 from core.utils import interaction_response, interaction_followup
-from queries.channel_query import get_pair_channel, insert_pair_channel, insert_guild_auth, select_guild_auth, select_super_user, update_thread_channel, update_voice_channel, update_alert_channel
+from queries.channel_query import (
+    get_pair_channel, insert_pair_channel, insert_guild_auth,
+    select_guild_auth, select_super_user, update_thread_channel,
+    update_voice_channel, update_alert_channel, update_deep_channel
+)
 
 logger = logging.getLogger(__name__)
 
@@ -254,6 +258,43 @@ class ChannelCog(commands.Cog):
             logger.error(f"알림 채널 설정 중 오류: {error}")
             await interaction_response(interaction, "명령어 실행 중 오류가 발생했습니다.")
 
+    @is_super_user()
+    @app_commands.command(name="심층채널", description="심층 컨텐츠를 위한 텍스트 채널을 설정합니다.")
+    @app_commands.describe(
+        channel="심층 제보용 텍스트 채널을 선택"
+    )
+    async def set_deep_channel(
+            self,
+            interaction: discord.Interaction,
+            channel: discord.TextChannel
+    ):
+        await interaction.response.defer(ephemeral=True)
+        with SessionLocal() as db:
+            try:
+                update_result = update_deep_channel(
+                    db, interaction.guild.id, channel.id
+                )
+    
+                if not update_result:
+                    await interaction_followup(interaction, "심층 채널 설정에 실패했습니다.")
+                    return
+    
+                db.commit()
+                await interaction_followup(interaction, f"심층 채널 {channel.mention} 설정완료.")
+    
+            except Exception as e:
+                logger.error(f"심층 채널 설정 중 오류 발생: {str(e)}")
+                await interaction_followup(interaction, f"심층 채널 설정 중 오류가 발생했습니다: {str(e)}")
+    
+    @set_deep_channel.error
+    async def deep_channel_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        """심층 채널 설정 중 오류 처리"""
+        if isinstance(error, app_commands.errors.CheckFailure):
+            await interaction_response(interaction, "이 명령어는 봇 운영자만 사용할 수 있습니다.")
+        else:
+            logger.error(f"심층 채널 설정 중 오류: {error}")
+            await interaction_response(interaction, "명령어 실행 중 오류가 발생했습니다.")
+    
 
 # ───────────────────────────────────────────────
 # Cog를 등록하는 설정 함수

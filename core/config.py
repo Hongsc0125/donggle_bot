@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     APPLICATION_ID: str
     PUBLIC_KEY: str
 
+    # openai
+    OPENAI_API_KEY: str
+
     class Config:
         env_file = '.env'
         env_file_encoding = 'utf-8'
