@@ -6,7 +6,9 @@ import asyncio
 from datetime import datetime, timedelta
 import re
 import traceback
+from core.config import settings
 from sqlalchemy import text
+
 
 from db.session import SessionLocal
 from core.utils import interaction_response, interaction_followup
@@ -451,7 +453,7 @@ class AlertRegisterButton(discord.ui.View):
     async def register_alert(self, interaction: discord.Interaction, button: discord.ui.Button):
         """알림등록 버튼 처리"""
         alert_cog = interaction.client.get_cog("AlertCog")
-        if alert_cog:
+        if (alert_cog):
             await alert_cog.show_alert_settings(interaction)
 
 # 심층 알림 토글 버튼 클래스 추가
@@ -500,8 +502,14 @@ class DeepAlertToggleButton(discord.ui.Button):
                 db.commit()
                 await interaction_followup(interaction, message)
                 
-                # 뷰 업데이트
-                await interaction.message.edit(view=self.view)
+                # 뷰 업데이트 - 오류 처리 개선
+                try:
+                    await interaction.message.edit(view=self.view)
+                except discord.errors.NotFound:
+                    logger.warning("메시지를 찾을 수 없습니다. 알림 토글 버튼을 다시 생성해야 합니다.")
+                    await interaction_followup(interaction, "알림 설정이 변경되었습니다. 화면을 새로고침해주세요.")
+                except Exception as e:
+                    logger.error(f"메시지 업데이트 중 오류: {e}")
                 
             except Exception as e:
                 logger.error(f"심층 알림 토글 중 오류: {str(e)}")
@@ -807,9 +815,21 @@ class AlertCog(commands.Cog):
             user_alerts = {}
             for alert in alerts:
                 user_id = alert['user_id']
-                if user_id not in user_alerts:
+                if not user_alerts.get(user_id):
                     user_alerts[user_id] = []
                 user_alerts[user_id].append(alert)
+
+            # 개발 환경에서는 알림을 봇 운영자에게만 전송
+            if settings.ENV == "development":
+                BOT_OPERATOR_ID = "307620267067179019"
+                
+                # 운영자 ID가 있는 경우에만 유지, 다른 사용자는 필터링
+                filtered_alerts = {}
+                if BOT_OPERATOR_ID in user_alerts:
+                    filtered_alerts[BOT_OPERATOR_ID] = user_alerts[BOT_OPERATOR_ID]
+                
+                user_alerts = filtered_alerts
+                logger.info(f"개발 환경: 봇 운영자만 알림 받음 ({len(user_alerts)} 명)")
             
             # 사용자에게 DM 전송
             for user_id, user_alert_list in user_alerts.items():
@@ -830,7 +850,7 @@ class AlertCog(commands.Cog):
                     alert_types = {}
                     for alert in user_alert_list:
                         alert_type = alert['alert_type']
-                        if alert_type not in alert_types:
+                        if not alert_types.get(alert_type):
                             alert_types[alert_type] = []
                         alert_types[alert_type].append(alert)
                     

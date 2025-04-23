@@ -43,6 +43,10 @@ jobs:
 
           # OPENAI
           OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+
+          # ENV
+          ENV=${{ secrets.ENV }}
+          
           EOF
           cat .env
 

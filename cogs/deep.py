@@ -52,26 +52,42 @@ class TimeInputModal(discord.ui.Modal, title="심층 제보"):
                 return
                 
             # 제보 정보 생성
-            reporter_name = interaction.user.display_name
             location = self.location
             
-            # 제보 임베드 생성
+            # 제보 임베드 생성 - 유저 멘션으로 변경
             embed = discord.Embed(
                 title="심층 제보",
-                description=f"**{reporter_name}님이 심층을 제보했습니다.**",
+                description=f"**<@{interaction.user.id}>님이 심층을 제보했습니다.**",
                 color=discord.Color.dark_purple()
             )
             embed.add_field(name="위치", value=location, inline=True)
             embed.add_field(name="남은 시간", value=f"{remaining_minutes}분", inline=True)
-            embed.set_footer(text=f"제보자: {reporter_name}")
+            embed.set_footer(text=f"제보자: {interaction.user.display_name}")
             
             # 채널에 메시지 전송
             await interaction.response.send_message(embed=embed)
             
+            # 원본 메시지 (임베드와 select box) 삭제 시도
+            try:
+                # 원래 상호작용이 발생한 메시지의 ID 저장
+                original_message_id = interaction.message.id
+                
+                # 채널에서 해당 메시지 찾기
+                channel = interaction.channel
+                original_message = await channel.fetch_message(original_message_id)
+                
+                # 메시지 삭제
+                await original_message.delete()
+                logger.info(f"원본 심층 정보 메시지 삭제 성공 (ID: {original_message_id})")
+            except Exception as delete_error:
+                # 메시지 삭제 실패 시 로그만 남기고 계속 진행 (UI 중복은 initialize_deep_button에서 처리)
+                logger.warning(f"원본 메시지 삭제 실패: {str(delete_error)}")
+            
             # DM 전송 처리
             await self.send_notifications(interaction, location, remaining_minutes)
             
-            # 버튼 메시지 초기화
+            # 버튼 메시지 초기화 - 새 메시지 추가 (모달 제출 후 지연 추가)
+            await asyncio.sleep(1)  # 약간의 지연을 주어 UI 갱신 안정화
             cog = interaction.client.get_cog("DeepCog")
             if cog:
                 await cog.initialize_deep_button(interaction.channel.id)
@@ -88,10 +104,10 @@ class TimeInputModal(discord.ui.Modal, title="심층 제보"):
                 # deep_alert_user 테이블에서 등록된 사용자 조회
                 users = select_deep_alert_users(db, interaction.guild.id)
                 
-                # DM 알림 내용 생성
+                # DM 알림 내용 생성 - 유저 멘션으로 변경
                 embed = discord.Embed(
                     title="심층 발견 알림",
-                    description=f"**{interaction.user.display_name}님이 심층을 제보했습니다.**",
+                    description=f"**<@{interaction.user.id}>님이 심층을 제보했습니다.**",
                     color=discord.Color.dark_purple()
                 )
                 embed.add_field(name="위치", value=location, inline=True)
@@ -110,13 +126,13 @@ class TimeInputModal(discord.ui.Modal, title="심층 제보"):
                         logger.warning(f"사용자 {user_data['user_id']}에게 DM 전송 실패: {str(user_error)}")
                 
                 if sent_count > 0:
-                    await interaction_followup(interaction, f"{sent_count}명의 사용자에게 심층 알림을 전송했습니다.", ephemeral=True)
+                    logger.info(f"{sent_count}명의 사용자에게 심층 알림을 전송했습니다.")
                 else:
-                    await interaction_followup(interaction, "알림을 전송할 사용자가 없습니다.", ephemeral=True)
+                    logger.info("알림을 전송할 사용자가 없습니다.")
                     
             except Exception as e:
                 logger.error(f"심층 알림 전송 중 오류: {str(e)}")
-                await interaction_followup(interaction, "알림 전송 중 오류가 발생했습니다.", ephemeral=True)
+                # await interaction_followup(interaction, "알림 전송 중 오류가 발생했습니다.", ephemeral=True)
 
 class DeepCog(commands.Cog):
     def __init__(self, bot):
@@ -160,7 +176,7 @@ class DeepCog(commands.Cog):
                 description=(
                     "위치를 선택하고 남은 시간을 입력하면 심층 제보가 등록됩니다.\n\n"
                     "허위 제보 시 제재를 받을 수 있으니 주의해 주세요!"
-                )
+                ),
             color=discord.Color.dark_purple()
         )
 
@@ -172,7 +188,7 @@ class DeepCog(commands.Cog):
                     message.components and
                     len(message.components) > 0 and
                     len(message.components[0].children) > 0 and
-                    isinstance(message.components[0].children[0], discord.ui.SelectMenu)
+                    isinstance(message.components[0].children[0], discord.ui.Select)
                 ):
                     # 기존 메시지 삭제
                     await message.delete()

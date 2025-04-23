@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     # openai
     OPENAI_API_KEY: str
 
+    # ENV
+    ENV: str
+
     class Config:
         env_file = '.env'
         env_file_encoding = 'utf-8'

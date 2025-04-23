@@ -232,7 +232,11 @@ ADD_DEEP_ALERT_USER = text("""
         :user_id
         , :guild_id
         , :user_name
-    ) RETURNING user_id, guild_id
+    )
+    ON CONFLICT (user_id) DO UPDATE 
+    SET guild_id = :guild_id, 
+        user_name = :user_name
+    RETURNING user_id, guild_id
 """)
 def add_deep_alert_user(db, user_id, guild_id, user_name):
     try:
