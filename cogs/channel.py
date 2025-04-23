@@ -31,6 +31,7 @@ class ChannelCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    @is_super_user()
     @app_commands.command(name="채널설정", description="등록, 리스트 채널을 설정하고 연결합니다.")
     @app_commands.checks.has_permissions(administrator=True)
     @app_commands.describe(
@@ -133,8 +134,9 @@ class ChannelCog(commands.Cog):
             logger.error(f"길드 인증 중 오류: {error}")
             await interaction_response(interaction, "명령어 실행 중 오류가 발생했습니다.")
 
+    @is_super_user()
     @app_commands.command(name="스레드채널설정", description="파티 모집 완료 시 비밀 쓰레드가 생성될 채널을 설정합니다.")
-    @app_commands.checks.has_permissions(administrator=True)
+    # @app_commands.checks.has_permissions(administrator=True)
     @app_commands.describe(
         channel="비밀 쓰레드가 생성될 채널을 선택"
     )
@@ -171,7 +173,7 @@ class ChannelCog(commands.Cog):
             await interaction_response(interaction, "명령어 실행 중 오류가 발생했습니다.")
 
     @app_commands.command(name="음성채널설정", description="음성채널 버튼 클릭 시 입장할 음성채널을 설정합니다.")
-    @app_commands.checks.has_permissions(administrator=True)
+    # @app_commands.checks.has_permissions(administrator=True)
     @app_commands.describe(
         channel="입장할 음성채널을 선택"
     )
@@ -207,8 +209,9 @@ class ChannelCog(commands.Cog):
             logger.error(f"음성채널 설정 중 오류: {error}")
             await interaction_response(interaction, "명령어 실행 중 오류가 발생했습니다.")
 
+    @is_super_user()
     @app_commands.command(name="알림채널설정", description="알림 기능을 사용할 채널을 설정합니다.")
-    @app_commands.checks.has_permissions(administrator=True)
+    # @app_commands.checks.has_permissions(administrator=True)
     @app_commands.describe(
         channel="알림 채널을 선택"
     )

@@ -403,7 +403,7 @@ class CustomAlertDeleteButton(discord.ui.Button):
                     pass
                 
                 # 새로운 상호작용으로 새 명령어 실행하도록 안내
-                await interaction_followup(interaction, "알림 설정이 변경되었습니다. `/알림설정` 명령어로 다시 설정 화면을 열어주세요.")
+                await interaction_followup(interaction, "알림 설정이 변경되었습니다. 메시지를 닫고 `/알림설정` 명령어 또는 버튼을 다시클릭하여 설정 화면을 열어주세요.")
                 
             except Exception as e:
                 logger.error(f"커스텀 알림 삭제 중 오류: {str(e)}")
