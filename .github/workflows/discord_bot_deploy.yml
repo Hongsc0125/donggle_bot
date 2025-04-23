@@ -40,6 +40,9 @@ jobs:
           DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }}
           APPLICATION_ID=${{ secrets.APPLICATION_ID }}
           PUBLIC_KEY=${{ secrets.PUBLIC_KEY }}
+
+          # OPENAI
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
           EOF
           cat .env
 
