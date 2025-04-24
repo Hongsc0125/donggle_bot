@@ -3,14 +3,16 @@ from discord.ext import commands
 from discord import app_commands
 import logging
 from datetime import datetime
+import traceback  # Add this import
 
 from db.session import SessionLocal
 from core.utils import interaction_response, interaction_followup
 from queries.channel_query import (
     get_pair_channel, insert_pair_channel, insert_guild_auth,
     select_guild_auth, select_super_user, update_thread_channel,
-    update_voice_channel, update_alert_channel, update_deep_channel
+    update_voice_channel, update_alert_channel, insert_deep_pair
 )
+# from cogs.deep import initialize_deep_button
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +89,7 @@ class ChannelCog(commands.Cog):
     ):
         await interaction.response.defer(ephemeral=True)
         
-# 봇 운영자 확인
+        # 봇 운영자 확인
         # if not self.is_bot_owner(interaction.user.id):
         #     await interaction.followup.send(
         #         "이 명령어는 봇운영자만 사용할 수 있습니다.",
@@ -261,30 +263,71 @@ class ChannelCog(commands.Cog):
     @is_super_user()
     @app_commands.command(name="심층채널", description="심층 컨텐츠를 위한 텍스트 채널을 설정합니다.")
     @app_commands.describe(
-        channel="심층 제보용 텍스트 채널을 선택"
-    )
+        channel="심층 제보용 텍스트 채널을 선택",
+        auth="권한 그룹명 입력"
+    ) 
     async def set_deep_channel(
             self,
             interaction: discord.Interaction,
-            channel: discord.TextChannel
+            channel: discord.TextChannel,
+            auth: str
     ):
-        await interaction.response.defer(ephemeral=True)
-        with SessionLocal() as db:
-            try:
-                update_result = update_deep_channel(
-                    db, interaction.guild.id, channel.id
-                )
-    
-                if not update_result:
-                    await interaction_followup(interaction, "심층 채널 설정에 실패했습니다.")
-                    return
-    
-                db.commit()
-                await interaction_followup(interaction, f"심층 채널 {channel.mention} 설정완료.")
-    
-            except Exception as e:
-                logger.error(f"심층 채널 설정 중 오류 발생: {str(e)}")
-                await interaction_followup(interaction, f"심층 채널 설정 중 오류가 발생했습니다: {str(e)}")
+        logger.info(f"심층채널 명령어 실행: 사용자 {interaction.user.id}, 채널 {channel.id}, 권한 {auth}")
+        
+        try:
+            await interaction.response.defer(ephemeral=True)
+            logger.info("응답 대기 상태로 전환됨")
+            
+            with SessionLocal() as db:
+                try:
+                    # 권한 그룹명 유효성 검사
+                    if not auth or len(auth.strip()) == 0:
+                        logger.warning(f"권한 그룹명이 비어있음: '{auth}'")
+                        await interaction_followup(interaction, "❌ 권한 그룹명을 입력해주세요.")
+                        return
+                    
+                    auth = auth.strip()  # 공백 제거
+                    logger.info(f"권한 그룹명 정제: '{auth}'")
+                    
+                    # 심층 채널과 권한 매핑 등록
+                    logger.info(f"insert_deep_pair 함수 호출 전: guild_id={interaction.guild.id}, channel_id={channel.id}, auth={auth}")
+                    insert_result = insert_deep_pair(
+                        db, interaction.guild.id, channel.id, auth
+                    )
+                    logger.info(f"insert_deep_pair 결과: {insert_result}")
+        
+                    if not insert_result:
+                        logger.error("심층 채널 설정 실패")
+                        await interaction_followup(interaction, "❌ 심층 채널 설정에 실패했습니다.")
+                        return
+        
+                    db.commit()
+                    logger.info("데이터베이스 변경사항 커밋됨")
+                    
+                    # Deep Cog에서 초기화
+                    deep_cog = self.bot.get_cog("DeepCog")
+                    if deep_cog:
+                        logger.info(f"DeepCog 찾음: {deep_cog}")
+                        await deep_cog.initialize_deep_button(channel.id, auth)
+                        logger.info(f"채널 초기화 완료: {channel.id}")
+                    else:
+                        logger.error("DeepCog를 찾을 수 없음")
+                        
+                    await interaction_followup(interaction, f"✅ 심층 채널 {channel.mention} 설정완료 (권한 그룹: {auth}).")
+                    logger.info(f"심층채널 명령어 처리 완료: 채널 {channel.id}, 권한 {auth}")
+                    
+                except Exception as e:
+                    logger.error(f"심층 채널 설정 중 오류 발생: {str(e)}")
+                    logger.error(f"오류 세부정보: {traceback.format_exc()}")
+                    await interaction_followup(interaction, f"❌ 심층 채널 설정 중 오류가 발생했습니다: {str(e)}")
+                    db.rollback()
+        except Exception as outer_e:
+            logger.error(f"심층채널 명령어 처리 중 예외 발생: {str(outer_e)}")
+            logger.error(f"오류 세부정보: {traceback.format_exc()}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message("❌ 명령어 처리 중 오류가 발생했습니다.", ephemeral=True)
+            else:
+                await interaction.followup.send("❌ 명령어 처리 중 오류가 발생했습니다.", ephemeral=True)
     
     @set_deep_channel.error
     async def deep_channel_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):

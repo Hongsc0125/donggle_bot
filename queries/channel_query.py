@@ -76,20 +76,99 @@ def select_super_user(db):
 
 
 
-UPDATE_DEEP_CHANNEL = text("""
-            UPDATE guilds 
-            SET deep_ch_id = :channel_id 
-                , update_dt = now()
-            WHERE guild_id = :guild_id
+# 기존 UPDATE_DEEP_CHANNEL 제거 후 아래 코드로 대체
+INSERT_DEEP_PAIR = text("""
+    INSERT INTO deep_pair (
+        deep_ch_id,
+        deep_guild_auth,
+        guild_id
+    ) VALUES (
+        :deep_ch_id,
+        :deep_guild_auth,
+        :guild_id
+    ) ON CONFLICT (deep_ch_id, guild_id) 
+    DO UPDATE SET 
+        deep_guild_auth = :deep_guild_auth
+    RETURNING deep_ch_id
 """)
-def update_deep_channel(db, guild_id, channel_id):
-    """길드의 심층 채널 ID를 업데이트합니다."""
+def insert_deep_pair(db, guild_id, deep_ch_id, deep_guild_auth):
+    """심층 채널과 권한 매핑을 등록합니다."""
     result = db.execute(
-        UPDATE_DEEP_CHANNEL,
-        {"guild_id": str(guild_id), "channel_id": str(channel_id)}
+        INSERT_DEEP_PAIR,
+        {
+            "guild_id": str(guild_id), 
+            "deep_ch_id": str(deep_ch_id),
+            "deep_guild_auth": str(deep_guild_auth)
+        }
     )
     return result.rowcount > 0
 
+# 심층 채널 조회 (수정: 모든 매핑 반환)
+SELECT_DEEP_CHANNELS = text("""
+    SELECT deep_ch_id, deep_guild_auth
+    FROM deep_pair
+    WHERE guild_id = :guild_id
+""")
+def select_deep_channels(db, guild_id):
+    rows = db.execute(SELECT_DEEP_CHANNELS, {
+        'guild_id': str(guild_id)
+    }).fetchall()
+    return [(row[0], row[1]) for row in rows] if rows else []
+
+# 특정 권한과 연결된 심층 채널 조회
+SELECT_DEEP_CHANNEL_BY_AUTH = text("""
+    SELECT deep_ch_id
+    FROM deep_pair
+    WHERE guild_id = :guild_id
+    AND deep_guild_auth = :deep_guild_auth
+""")
+def select_deep_channel_by_auth(db, guild_id, deep_guild_auth):
+    row = db.execute(SELECT_DEEP_CHANNEL_BY_AUTH, {
+        'guild_id': str(guild_id),
+        'deep_guild_auth': str(deep_guild_auth)
+    }).fetchone()
+    return row[0] if row and row[0] else None
+
+# 심층 채널에 매핑된 권한 조회
+SELECT_DEEP_AUTH_BY_CHANNEL = text("""
+    SELECT deep_guild_auth
+    FROM deep_pair
+    WHERE guild_id = :guild_id
+    AND deep_ch_id = :deep_ch_id
+""")
+def select_deep_auth_by_channel(db, guild_id, deep_ch_id):
+    row = db.execute(SELECT_DEEP_AUTH_BY_CHANNEL, {
+        'guild_id': str(guild_id),
+        'deep_ch_id': str(deep_ch_id)
+    }).fetchone()
+    return row[0] if row and row[0] else None
+
+# 특정 권한과 연결된 심층 채널 목록 조회
+SELECT_DEEP_CHANNELS_BY_AUTH = text("""
+    SELECT deep_ch_id
+    FROM deep_pair
+    WHERE guild_id = :guild_id
+    AND deep_guild_auth = :deep_guild_auth
+""")
+def select_deep_channels_by_auth(db, guild_id, deep_guild_auth):
+    rows = db.execute(SELECT_DEEP_CHANNELS_BY_AUTH, {
+        'guild_id': str(guild_id),
+        'deep_guild_auth': str(deep_guild_auth)
+    }).fetchall()
+    return [row[0] for row in rows] if rows else []
+
+# 기존 SELECT_DEEP_CHANNEL 유지 (하위 호환성)
+# 심층 채널 조회
+SELECT_DEEP_CHANNEL = text("""
+    SELECT deep_ch_id
+    FROM guilds
+    WHERE guild_id = :guild_id
+""")
+def select_deep_channel(db, guild_id):
+    row = db.execute(SELECT_DEEP_CHANNEL, {
+        'guild_id': str(guild_id)
+    }).fetchone()
+    return row[0] if row and row[0] else None
 
 # 비밀스레드 부모채널 설정
 UPDATE_THREAD_CHANNEL = text("""
@@ -127,18 +206,6 @@ SELECT_VOICE_CHANNEL = text("""
 """)
 def select_voice_channel(db, guild_id):
     row = db.execute(SELECT_VOICE_CHANNEL, {
-        'guild_id': str(guild_id)
-    }).fetchone()
-    return row[0] if row and row[0] else None
-
-# 심층 채널 조회
-SELECT_DEEP_CHANNEL = text("""
-    SELECT deep_ch_id
-    FROM guilds
-    WHERE guild_id = :guild_id
-""")
-def select_deep_channel(db, guild_id):
-    row = db.execute(SELECT_DEEP_CHANNEL, {
         'guild_id': str(guild_id)
     }).fetchone()
     return row[0] if row and row[0] else None

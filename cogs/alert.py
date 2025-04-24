@@ -49,7 +49,7 @@ ALERT_TYPE_EMOJI = {
     'sun': '⚪'
 }
 
-# 요일 매핑
+# 요일 매핑 수정
 DAY_OF_WEEK = {
     0: 'mon',
     1: 'tue',
@@ -60,11 +60,10 @@ DAY_OF_WEEK = {
     6: 'sun'
 }
 
-# 한글->영어 변환용 매핑
+# 한글->영어 변환용 매핑 수정
 INTERVAL_MAPPING = {
     "매일": "day", 
     "매주": "week", 
-    "day": "day", 
     "week": "week"
 }
 
@@ -75,11 +74,11 @@ DAY_MAPPING = {
     "목": "thu", 
     "금": "fri", 
     "토": "sat", 
-    "일": "sun",
+    "일": "sun", 
     "mon": "mon", 
     "tue": "tue", 
     "wed": "wed", 
-    "thu": "thu",
+    "thu": "thu", 
     "fri": "fri", 
     "sat": "sat", 
     "sun": "sun"
@@ -104,8 +103,6 @@ class AlertView(discord.ui.View):
                     if member:
                         guild_id = guild.id
                         break
-            
-            is_deep_alert_on = check_deep_alert_user(db, user_id, guild_id) if guild_id else False
         
         # 각 컴포넌트를 특정 행에 배치
         boss_select = AlertSelect('boss', '보스 알림 🔔', user_id)
@@ -120,16 +117,53 @@ class AlertView(discord.ui.View):
         day_select.row = 2  # 세 번째 행
         self.add_item(day_select)
         
-        # 심층 알림 토글 버튼 추가
-        deep_btn = DeepAlertToggleButton(is_deep_alert_on)
-        deep_btn.row = 3  # 네 번째 행
-        self.add_item(deep_btn)
-        
         # 커스텀 알림 버튼 - 2개 제한 로직 적용
         custom_btn = CustomAlertButton()
         custom_btn.disabled = custom_alert_count >= 2  # 2개 이상이면 버튼 비활성화
-        custom_btn.row = 4  # 다섯 번째 행
+        custom_btn.row = 3  # 네 번째 행
         self.add_item(custom_btn)
+        
+        # 심층 알림 관련 데이터 가져오기
+        with SessionLocal() as db:
+            # 사용자가 속한 길드 정보 가져오기
+            guild_id = None
+            for guild in bot.guilds:
+                member = guild.get_member(int(user_id))
+                if member:
+                    guild_id = guild.id
+                    break
+            
+            if guild_id:
+                # 사용자의 권한 확인 - 멤버 객체를 통해 역할 가져오기
+                member = bot.get_guild(guild_id).get_member(int(user_id))
+                user_roles = [role.name for role in member.roles] if member else []
+                
+                # 모든 심층 채널 및 권한 그룹 정보 가져오기
+                from queries.channel_query import select_deep_channels
+                auth_groups = []
+                
+                deep_channels = select_deep_channels(db, guild_id)
+                for _, auth in deep_channels:
+                    if auth not in auth_groups:
+                        auth_groups.append(auth)
+                
+                # 사용자가 권한을 가진 그룹만 필터링
+                # 1. 권한 그룹이 사용자 역할과 일치하는 경우 또는
+                # 2. 관리자 권한이 있는 경우
+                user_auth_groups = []
+                for auth_group in auth_groups:
+                    # 권한 그룹 이름이 사용자 역할과 일치하는지 또는 사용자가 관리자인지 확인
+                    if auth_group in user_roles or member.guild_permissions.administrator:
+                        user_auth_groups.append(auth_group)
+                
+                # 버튼 추가 - 사용자가 권한을 가진 그룹에 대해서만
+                # Discord UI는 최대 5개 행(0-4)만 허용하므로 버튼을 마지막 행에 배치
+                for i, auth_group in enumerate(user_auth_groups[:5]):  # 최대 5개 그룹으로 제한
+                    # 해당 권한 그룹에 대한 알림 상태 확인
+                    is_on = check_deep_alert_user(db, user_id, guild_id, auth_group)
+                    deep_btn = DeepAlertToggleButton(is_on, auth_group)
+                    deep_btn.row = 4  # 모든 심층 버튼을 마지막 행에 배치
+                    self.add_item(deep_btn)
 
 class AlertSelect(discord.ui.Select):
     def __init__(self, alert_type, placeholder, user_id):
@@ -456,16 +490,17 @@ class AlertRegisterButton(discord.ui.View):
         if (alert_cog):
             await alert_cog.show_alert_settings(interaction)
 
-# 심층 알림 토글 버튼 클래스 추가
+# 심층 알림 토글 버튼 클래스 수정
 class DeepAlertToggleButton(discord.ui.Button):
-    def __init__(self, is_on=False):
+    def __init__(self, is_on=False, auth_group=None):
         super().__init__(
             style=discord.ButtonStyle.success if is_on else discord.ButtonStyle.secondary,
-            label="심층 알림 ON" if is_on else "심층 알림 OFF",
+            label=f"심층 알림 ON ({auth_group})" if is_on else f"심층 알림 OFF ({auth_group})",
             emoji="🧊" if is_on else "🔕",
             row=3
         )
         self.is_on = is_on
+        self.auth_group = auth_group
     
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -475,39 +510,47 @@ class DeepAlertToggleButton(discord.ui.Button):
                 # 현재 상태 확인
                 user_id = interaction.user.id
                 guild_id = interaction.guild.id
+                auth_group = self.auth_group
                 
                 if self.is_on:
-                    # 알림 제거
-                    result = remove_deep_alert_user(db, user_id, guild_id)
+                    # 알림 제거 - 권한별로 제거
+                    result = remove_deep_alert_user(db, user_id, guild_id, auth_group)
                     if result:
                         self.is_on = False
                         self.style = discord.ButtonStyle.secondary
-                        self.label = "심층 알림 OFF"
+                        self.label = f"심층 알림 OFF ({auth_group})"
                         self.emoji = "🔕"
-                        message = "심층 알림이 비활성화되었습니다."
+                        message = f"{auth_group} 심층 알림이 비활성화되었습니다."
                     else:
-                        message = "심층 알림 비활성화에 실패했습니다."
+                        message = f"{auth_group} 심층 알림 비활성화에 실패했습니다."
                 else:
-                    # 알림 추가
-                    result = add_deep_alert_user(db, user_id, guild_id, interaction.user.display_name)
-                    if result:
-                        self.is_on = True
-                        self.style = discord.ButtonStyle.success
-                        self.label = "심층 알림 ON"
-                        self.emoji = "🧊"
-                        message = "심층 알림이 활성화되었습니다. 심층 제보가 있을 때 DM으로 알림을 받습니다."
+                    # 해당 권한 그룹과 연결된 채널 ID 조회
+                    from queries.channel_query import select_deep_channel_by_auth
+                    deep_ch_id = select_deep_channel_by_auth(db, guild_id, auth_group)
+                    
+                    if not deep_ch_id:
+                        message = f"{auth_group} 채널 정보를 찾을 수 없습니다. 관리자에게 문의하세요."
                     else:
-                        message = "심층 알림 활성화에 실패했습니다."
+                        # 알림 추가 - 권한별로 추가 (상호작용 채널이 아닌 권한 그룹의 채널 사용)
+                        result = add_deep_alert_user(db, user_id, guild_id, interaction.user.display_name, deep_ch_id)
+                        if result:
+                            self.is_on = True
+                            self.style = discord.ButtonStyle.success
+                            self.label = f"심층 알림 ON ({auth_group})"
+                            self.emoji = "🧊"
+                            message = f"{auth_group} 심층 알림이 활성화되었습니다. 심층 제보가 있을 때 DM으로 알림을 받습니다."
+                        else:
+                            message = f"{auth_group} 심층 알림 활성화에 실패했습니다."
                 
                 db.commit()
                 await interaction_followup(interaction, message)
                 
-                # 뷰 업데이트 - 오류 처리 개선
+                # 뷰 업데이트
                 try:
                     await interaction.message.edit(view=self.view)
                 except discord.errors.NotFound:
                     logger.warning("메시지를 찾을 수 없습니다. 알림 토글 버튼을 다시 생성해야 합니다.")
-                    await interaction_followup(interaction, "알림 설정이 변경되었습니다. 화면을 새로고침해주세요.")
+                    await interaction_followup(interaction, "알림 설정이 변경되었습니다. 등록 양식 메시지를 닫고 `알림등록` 버튼을 다시 눌러 상태를 갱신해주세요.")
                 except Exception as e:
                     logger.error(f"메시지 업데이트 중 오류: {e}")
                 
@@ -634,7 +677,7 @@ class AlertCog(commands.Cog):
                     return
                 
                 # 심층 알림 상태 확인
-                is_deep_alert_on = check_deep_alert_user(db, interaction.user.id, interaction.guild.id)
+                is_deep_alert_on = check_deep_alert_user(db, interaction.user.id, interaction.guild.id, None)
             
             # 알림 설정 임베드 생성
             embed = discord.Embed(
