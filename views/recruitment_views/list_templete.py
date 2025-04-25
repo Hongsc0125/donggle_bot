@@ -355,7 +355,8 @@ class RecruitmentListButtonView(discord.ui.View):
             
             # 모집 상태값 업데이트(4: 모집취소)
             update_result = update_recruitment_status(db, 4, recru_id=recru_id)
-                
+            
+            # 버튼 제거 후 임베드 업데이트    
             if not update_result:
                 await interaction_response(interaction, "❌ 모집취소 상태 업데이트에 실패했습니다.")
                 return
