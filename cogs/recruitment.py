@@ -205,15 +205,24 @@ class RecruitmentCog(commands.Cog):
                 create_dt=recruitment['create_dt']
             )
             
+            # 버튼 뷰 생성 - 상태에 따라 버튼 표시 여부 결정
+            view = None
+            if recruitment['status_code'] == 2:  # 모집중인 경우만 버튼 포함
+                view = RecruitmentListButtonView(recru_id=recru_id)
+            else:
+                # 모집 완료/취소 상태일 때는 버튼 없는 뷰로 설정
+                view = RecruitmentListButtonView(recru_id=recru_id)
+                view.remove_all_buttons(recruitment['status_code'])
+            
             # 메시지 찾아서 업데이트
             try:
                 message = await channel.fetch_message(int(message_id))
-                await message.edit(embed=embed, view=RecruitmentListButtonView(recru_id=recru_id))
+                await message.edit(embed=embed, view=view)
                 logger.info(f"공고 {recru_id} 메시지 업데이트 완료")
             except discord.NotFound:
                 # 메시지를 찾을 수 없는 경우 새로 생성
                 logger.warning(f"메시지 {message_id}를 찾을 수 없습니다. 새로 생성합니다.")
-                new_message = await channel.send(embed=embed, view=RecruitmentListButtonView(recru_id=recru_id))
+                new_message = await channel.send(embed=embed, view=view)
                 
                 # DB에 새 메시지 ID 업데이트
                 update_result = update_recruitment_message_id(db, new_message.id, recru_id)
@@ -225,16 +234,28 @@ class RecruitmentCog(commands.Cog):
             except Exception as e:
                 logger.error(f"공고 {recru_id} 메시지 업데이트 중 오류: {str(e)}")
         
-        # 불필요한 메시지 삭제
+        # 불필요한 메시지 삭제 (봇이 보낸 메시지 중 현재 모집과 관련 없는 메시지만)
         try:
             deleted_count = 0
             async for message in channel.history(limit=100):
                 if message.id not in keep_message_ids and message.author.id == self.bot.user.id:
-                    try:
-                        await message.delete()
-                        deleted_count += 1
-                    except Exception as e:
-                        logger.warning(f"메시지 {message.id} 삭제 실패: {str(e)}")
+                    # 임베드 확인해서 모집 공고인지 확인 (푸터에 recruitment ID가 있는지)
+                    is_recruitment = False
+                    if message.embeds:
+                        for embed in message.embeds:
+                            if embed.footer and embed.footer.text and embed.footer.text.strip():
+                                # 모집 ID 형식 - 숫자로만 이루어진 ID 또는 특정 패턴 확인
+                                is_recruitment = True
+                                break
+                    
+                    # 모집 공고로 보이지 않는 메시지만 삭제
+                    if not is_recruitment:
+                        try:
+                            await message.delete()
+                            deleted_count += 1
+                        except Exception as e:
+                            logger.warning(f"메시지 {message.id} 삭제 실패: {str(e)}")
+            
             logger.info(f"리스트 채널 {channel_id}에서 불필요한 메시지 {deleted_count}개 삭제")
         except Exception as e:
             logger.error(f"채널 {channel_id} 메시지 정리 중 오류: {str(e)}")
