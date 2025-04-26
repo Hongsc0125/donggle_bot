@@ -147,19 +147,14 @@ class AlertView(discord.ui.View):
                     if auth not in auth_groups:
                         auth_groups.append(auth)
                 
-                # 사용자가 권한을 가진 그룹만 필터링
-                # 1. 권한 그룹이 사용자 역할과 일치하는 경우 또는
-                # 2. 관리자 권한이 있는 경우
+                # 사용자가 권한을 가진 그룹만 필터링 (관리자도 자신의 역할명과 일치하는 그룹만)
                 user_auth_groups = []
                 for auth_group in auth_groups:
-                    # 권한 그룹 이름이 사용자 역할과 일치하는지 또는 사용자가 관리자인지 확인
-                    if auth_group in user_roles or member.guild_permissions.administrator:
+                    if auth_group in user_roles:
                         user_auth_groups.append(auth_group)
                 
                 # 버튼 추가 - 사용자가 권한을 가진 그룹에 대해서만
-                # Discord UI는 최대 5개 행(0-4)만 허용하므로 버튼을 마지막 행에 배치
                 for i, auth_group in enumerate(user_auth_groups[:5]):  # 최대 5개 그룹으로 제한
-                    # 해당 권한 그룹에 대한 알림 상태 확인
                     is_on = check_deep_alert_user(db, user_id, guild_id, auth_group)
                     deep_btn = DeepAlertToggleButton(is_on, auth_group)
                     deep_btn.row = 4  # 모든 심층 버튼을 마지막 행에 배치
