@@ -171,7 +171,7 @@ class AlertSelect(discord.ui.Select):
             
             # 전달된 user_id를 사용하여 사용자 선택 알림 가져오기
             user_alerts = get_user_alerts(db, self.user_id)
-            user_alert_ids = [alert['alert_id'] for alert in user_alerts]
+            user_alert_ids = [str(alert['alert_id']) for alert in user_alerts]  # Convert all to strings
             
             # 옵션 생성
             options = []
@@ -180,10 +180,10 @@ class AlertSelect(discord.ui.Select):
                 emoji = ALERT_TYPE_EMOJI.get(alert_type, '🔔')
                 option = discord.SelectOption(
                     label=f"{ALERT_TYPE_NAMES.get(alert_type, alert_type)} {alert_time}",
-                    value=str(alert['alert_id']),
+                    value=str(alert['alert_id']),  # Ensure value is a string
                     description=f"{alert['interval']}마다 {alert_time}에 알림",
                     emoji=emoji,
-                    default=alert['alert_id'] in user_alert_ids
+                    default=str(alert['alert_id']) in user_alert_ids  # Compare strings with strings
                 )
                 options.append(option)
         
@@ -201,11 +201,11 @@ class AlertSelect(discord.ui.Select):
             try:
                 # 현재 사용자의 이 유형 알림 가져오기
                 user_alerts = get_user_alerts(db, interaction.user.id)
-                current_alert_ids = [alert['alert_id'] for alert in user_alerts 
-                                    if alert['alert_type'] == self.alert_type]
+                current_alert_ids = [str(alert['alert_id']) for alert in user_alerts 
+                                    if alert['alert_type'] == self.alert_type]  # Convert to string
                 
                 # 추가할 알림과 제거할 알림 결정
-                selected_alert_ids = [int(alert_id) for alert_id in self.values]
+                selected_alert_ids = [alert_id for alert_id in self.values]  # Keep as strings
                 
                 # 새 선택 추가
                 for alert_id in selected_alert_ids:
@@ -280,17 +280,18 @@ class DaySelect(discord.ui.Select):
                 
                 # 사용자가 선택한 요일 알림 가져오기
                 user_alerts = get_user_alerts(db, interaction.user.id)
-                current_day_alert_ids = [alert['alert_id'] for alert in user_alerts 
+                current_day_alert_ids = [str(alert['alert_id']) for alert in user_alerts 
                                         if alert['alert_type'] in ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']]
                 
                 # 각 요일 알림 처리
                 for alert in day_alerts:
-                    if alert['alert_type'] in selected_days and alert['alert_id'] not in current_day_alert_ids:
+                    alert_id_str = str(alert['alert_id'])  # Convert to string
+                    if alert['alert_type'] in selected_days and alert_id_str not in current_day_alert_ids:
                         # 이 요일 알림 추가
-                        add_user_alert(db, interaction.user.id, alert['alert_id'])
-                    elif alert['alert_type'] not in selected_days and alert['alert_id'] in current_day_alert_ids:
+                        add_user_alert(db, interaction.user.id, alert_id_str)
+                    elif alert['alert_type'] not in selected_days and alert_id_str in current_day_alert_ids:
                         # 이 요일 알림 제거
-                        remove_user_alert(db, interaction.user.id, alert['alert_id'])
+                        remove_user_alert(db, interaction.user.id, alert_id_str)
                 
                 db.commit()
                 

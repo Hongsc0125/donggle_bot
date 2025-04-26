@@ -105,7 +105,7 @@ CHECK_USER_ALERT = text("""
 def check_user_alert(db, user_id, alert_id):
     row = db.execute(CHECK_USER_ALERT, {
         "user_id": str(user_id),
-        "alert_id": alert_id
+        "alert_id": alert_id  # Don't try to convert to int
     }).fetchone()
     return row[0] > 0
 
@@ -119,7 +119,7 @@ ADD_USER_ALERT = text("""
 def add_user_alert(db, user_id, alert_id):
     result = db.execute(ADD_USER_ALERT, {
         "user_id": str(user_id),
-        "alert_id": alert_id
+        "alert_id": alert_id  # Don't try to convert to int
     })
     return result.rowcount > 0
 
@@ -133,7 +133,7 @@ REMOVE_USER_ALERT = text("""
 def remove_user_alert(db, user_id, alert_id):
     result = db.execute(REMOVE_USER_ALERT, {
         "user_id": str(user_id),
-        "alert_id": alert_id
+        "alert_id": alert_id  # Don't try to convert to int
     })
     return result.rowcount > 0
 
