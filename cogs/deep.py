@@ -228,7 +228,8 @@ class TimeInputModal(discord.ui.Modal, title="심층 제보"):
             embed = discord.Embed(
                 title="심층 제보",
                 description=f"**<@{interaction.user.id}>님이 심층을 제보했습니다.**",
-                color=discord.Color.dark_purple()
+                color=discord.Color.dark_purple(),
+                timestamp=datetime.now()  # 현재 시간을 타임스탬프로 추가
             ).set_thumbnail(url="https://harmari.duckdns.org/static/심층구멍.png")
             embed.add_field(name="위치", value=location, inline=True)
             embed.add_field(name="남은 시간", value=f"{remaining_minutes}분", inline=True)
@@ -470,16 +471,21 @@ class DeepCog(commands.Cog):
             
         # 버튼 뷰 생성
         view = DeepButtonView()
+        
+        # 새로운 포맷의 임베드 생성
         embed = discord.Embed(
-            title="심층 제보 시스템",
-            description="아래 드롭다운 메뉴에서 심층 위치를 선택하여 제보해주세요.",
+            title=f"🧊 심층 정보를 공유해 주세요! 🧊 - {auth if auth else ''}",
+            description="📝 **심층 제보 방법**\n"
+                       "아래 선택 메뉴에서 심층 위치를 선택하세요\n"
+                       "심층 소멸까지 남은 시간(분)을 입력하세요\n\n"
+                       "⚠️ **주의사항**\n"
+                       "• 이미 등록된 위치는 시간이 지날 때까지 중복 제보가 불가능합니다\n"
+                       "• 3회 이상 신고가 누적되면 제보 정보가 자동 삭제됩니다\n"
+                       "• 허위 제보 시 서버 이용에 제한을 받을 수 있습니다\n"
+                       "• 잘못 작성 하신분은 채팅채널에서 @관리자 를 태그해서 말씀해주세요.",
             color=discord.Color.dark_purple()
         ).set_thumbnail(url="https://harmari.duckdns.org/static/심층구멍.png")
         
-        # 권한 그룹 표시
-        if auth:
-            embed.add_field(name="권한 그룹", value=auth, inline=False)
-            
         embed.set_footer(text=f"마지막 업데이트: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
         # 기존 Select 메시지가 있으면 업데이트, 없으면 새로 생성
