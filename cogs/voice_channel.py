@@ -177,8 +177,9 @@ class VoiceChannelCog(commands.Cog):
             }
             self.user_channels[member.id] = str(temp_channel.id)
             
-            # 스레드에 초대 링크 전송
-            await self.send_invite_to_thread(member, temp_channel, recru_id)
+            # 스레드에 초대 링크 전송 (recru_id가 있을 때만)
+            if recru_id:
+                await self.send_invite_to_thread(member, temp_channel, recru_id)
             
             logger.info(f"임시 음성채널이 생성되었습니다: {channel_name} (ID: {temp_channel.id})")
             return temp_channel
@@ -217,23 +218,9 @@ class VoiceChannelCog(commands.Cog):
                             if thread:
                                 break
             
-            # DB에서 조회 실패 시, 최근 스레드 검색 (기존 로직 유지)
+            # recru_id가 없거나 스레드를 찾지 못하면 메시지 전송하지 않음
             if not thread:
-                threads = []
-                for guild in self.bot.guilds:
-                    for thread in guild.threads:
-                        if member in thread.members:
-                            threads.append(thread)
-                
-                if threads:
-                    # 가장 최근 스레드 선택 (1시간 이내 활동)
-                    for t in threads:
-                        if t.created_at > datetime.now() - timedelta(hours=1):
-                            thread = t
-                            break
-            
-            if not thread:
-                logger.warning(f"스레드를 찾을 수 없습니다. 초대 링크를 전송하지 않습니다.")
+                logger.info("파티모집완료된 스레드가 아니므로 초대 메시지를 전송하지 않습니다.")
                 return
             
             # 초대 링크 생성 및 전송
