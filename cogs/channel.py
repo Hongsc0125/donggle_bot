@@ -91,13 +91,6 @@ class ChannelCog(commands.Cog):
     ):
         await interaction.response.defer(ephemeral=True)
         
-        # 봇 운영자 확인
-        # if not self.is_bot_owner(interaction.user.id):
-        #     await interaction.followup.send(
-        #         "이 명령어는 봇운영자만 사용할 수 있습니다.",
-        #         ephemeral=True
-        #     )
-        #     return
         with SessionLocal() as db:
             try:
                 if not 유효기간:
@@ -111,12 +104,11 @@ class ChannelCog(commands.Cog):
                     await interaction_followup(interaction, "❌ 유효기간은 `YYYYMMDD` 형식으로 입력해주세요.")
                     return
                 
-                # --- select_guild_auth로 기존 만료일 체크 ---
+                # 기존 길드 여부 체크 (정보 표시용)
                 existing_count = select_guild_auth(db, interaction.guild.id, expire_dt)
-                if existing_count and existing_count[0] > 0:
-                    await interaction_followup(interaction, "이미 등록된 길드입니다.")
-                    return
-
+                is_update = existing_count and existing_count[0] > 0
+                
+                # 새 레코드 삽입 또는 기존 레코드 업데이트
                 result = insert_guild_auth(
                     db,
                     interaction.guild.id,
@@ -126,7 +118,11 @@ class ChannelCog(commands.Cog):
                 db.commit()
 
                 if result:
-                    await interaction_followup(interaction, "길드 인증이 완료되었습니다.")
+                    # 새 등록인지 업데이트인지에 따라 다른 메시지 표시
+                    if is_update:
+                        await interaction_followup(interaction, f"길드 인증이 업데이트되었습니다. (만료일: {유효기간})")
+                    else:
+                        await interaction_followup(interaction, f"길드 인증이 완료되었습니다. (만료일: {유효기간})")
                 else:
                     await interaction_followup(interaction, "길드 인증에 실패했습니다.")
             except Exception as e:

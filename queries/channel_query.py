@@ -34,6 +34,7 @@ def insert_pair_channel(db, guild_id, regist_ch_id, list_ch_id):
     }).fetchone()
 
 
+# Guild 인증 삽입/업데이트 (ON CONFLICT 사용)
 INSERT_GUILD_AUTH = text("""
     INSERT INTO guilds (
         guild_id,
@@ -43,7 +44,13 @@ INSERT_GUILD_AUTH = text("""
         :guild_id,
         :guild_name,
         :auth_expiration_dt
-    ) RETURNING *
+    ) 
+    ON CONFLICT (guild_id) 
+    DO UPDATE SET 
+        guild_name = :guild_name,
+        auth_expiration_dt = :auth_expiration_dt,
+        update_dt = now()
+    RETURNING *
 """)
 def insert_guild_auth(db, guild_id, guild_name, expire_dt):
     return db.execute(INSERT_GUILD_AUTH, {
