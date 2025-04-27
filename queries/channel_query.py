@@ -210,6 +210,71 @@ def select_voice_channel(db, guild_id):
     }).fetchone()
     return row[0] if row and row[0] else None
 
+# 길드의 음성채널 부모채널 ID 목록 조회
+SELECT_VOICE_CHANNELS = text("""
+    SELECT parents_voice_ch_id
+    FROM guilds_voice_ch
+    WHERE guild_id = :guild_id
+""")
+def select_voice_channels(db, guild_id):
+    """음성채널 ID 목록 조회"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # logger.info(f"음성채널 ID 목록 조회: 길드 ID {guild_id}")
+    try:
+        rows = db.execute(SELECT_VOICE_CHANNELS, {
+            'guild_id': str(guild_id)
+        }).fetchall()
+        result = [row[0] for row in rows] if rows else []
+        # logger.info(f"음성채널 ID 목록 조회 결과: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"음성채널 ID 목록 조회 중 오류: {e}")
+        return []
+
+# 음성채널 추가
+INSERT_VOICE_CHANNEL = text("""
+    INSERT INTO guilds_voice_ch (
+        guild_id,
+        parents_voice_ch_id
+    ) VALUES (
+        :guild_id,
+        :parents_voice_ch_id
+    )
+    ON CONFLICT (guild_id, parents_voice_ch_id) 
+    DO NOTHING
+    RETURNING parents_voice_ch_id
+""")
+def insert_voice_channel(db, guild_id, channel_id):
+    """음성채널을 새 테이블에 추가"""
+    result = db.execute(INSERT_VOICE_CHANNEL, {
+        'guild_id': str(guild_id),
+        'parents_voice_ch_id': str(channel_id)
+    })
+    return result.rowcount > 0
+
+# 음성채널 삭제
+DELETE_VOICE_CHANNEL = text("""
+    DELETE FROM guilds_voice_ch
+    WHERE guild_id = :guild_id
+    AND parents_voice_ch_id = :parents_voice_ch_id
+    RETURNING parents_voice_ch_id
+""")
+def delete_voice_channel(db, guild_id, channel_id):
+    """음성채널을 테이블에서 제거"""
+    result = db.execute(DELETE_VOICE_CHANNEL, {
+        'guild_id': str(guild_id),
+        'parents_voice_ch_id': str(channel_id)
+    })
+    return result.rowcount > 0
+
+# 하위 호환성을 위한 기존 메서드 유지
+def select_voice_channel(db, guild_id):
+    """하위 호환성 - 음성채널 목록을 단일 채널처럼 반환"""
+    channels = select_voice_channels(db, guild_id)
+    return channels[0] if channels else None
+
 # 알림 채널 설정
 UPDATE_ALERT_CHANNEL = text("""
     UPDATE guilds

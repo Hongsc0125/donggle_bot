@@ -10,7 +10,9 @@ from core.utils import interaction_response, interaction_followup
 from queries.channel_query import (
     get_pair_channel, insert_pair_channel, insert_guild_auth,
     select_guild_auth, select_super_user, update_thread_channel,
-    update_voice_channel, update_alert_channel, insert_deep_pair
+    update_voice_channel, update_alert_channel, insert_deep_pair,
+    # 새 함수 추가
+    select_voice_channels, insert_voice_channel, delete_voice_channel
 )
 # from cogs.deep import initialize_deep_button
 
@@ -178,33 +180,67 @@ class ChannelCog(commands.Cog):
             logger.error(f"쓰레드 채널 설정 중 오류: {error}")
             await interaction_response(interaction, "명령어 실행 중 오류가 발생했습니다.")
 
-    @app_commands.command(name="음성채널설정", description="음성채널 버튼 클릭 시 입장할 음성채널을 설정합니다.")
-    # @app_commands.checks.has_permissions(administrator=True)
-    @app_commands.describe(
-        channel="입장할 음성채널을 선택"
-    )
+    @app_commands.command(name="음성채널설정", description="임시 음성채널을 생성할 부모 채널을 설정합니다.")
     async def set_voice_channel(
             self,
-            interaction: discord.Interaction,
-            channel: discord.VoiceChannel
+            interaction: discord.Interaction
     ):
         await interaction.response.defer(ephemeral=True)
+        
+        # 관리자 권한 확인
+        if not interaction.user.guild_permissions.administrator:
+            await interaction_followup(interaction, "이 명령어는 관리자만 사용할 수 있습니다.")
+            return
+        
         with SessionLocal() as db:
             try:
-                update_result = update_voice_channel(
-                    db, interaction.guild.id, channel.id
-                )
-
-                if not update_result:
-                    await interaction_followup(interaction, "음성채널 설정에 실패했습니다.")
+                # 현재 선택된 채널 목록 조회
+                current_channels = select_voice_channels(db, interaction.guild.id)
+                
+                # 서버의 모든 음성 채널 목록 가져오기
+                all_voice_channels = [ch for ch in interaction.guild.channels 
+                                    if isinstance(ch, discord.VoiceChannel)]
+                
+                if not all_voice_channels:
+                    await interaction_followup(interaction, "서버에 음성 채널이 없습니다.")
                     return
-
-                db.commit()
-                await interaction_followup(interaction, f"음성채널 {channel.mention} 설정완료.")
-
+                
+                # 임베드 생성
+                embed = discord.Embed(
+                    title="음성채널 설정",
+                    description="임시 음성채널 생성을 위한 부모 채널을 선택하세요.\n아래 선택된 채널들에 입장하면 자동으로 임시 채널이 생성됩니다.",
+                    color=discord.Color.blue()
+                )
+                
+                # 현재 설정된 채널 표시
+                if current_channels:
+                    selected_channels = []
+                    for ch_id in current_channels:
+                        channel = interaction.guild.get_channel(int(ch_id))
+                        if channel:
+                            selected_channels.append(f"• {channel.name} (ID: {ch_id})")
+                    
+                    embed.add_field(
+                        name="현재 설정된 채널",
+                        value="\n".join(selected_channels),
+                        inline=False
+                    )
+                else:
+                    embed.add_field(
+                        name="현재 설정된 채널",
+                        value="아직 설정된 채널이 없습니다.",
+                        inline=False
+                    )
+                
+                # 선택 뷰 생성 및 전송
+                view = VoiceChannelSelectView(interaction.guild.id, all_voice_channels, current_channels)
+                
+                # 직접 Discord API 사용
+                await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+                
             except Exception as e:
-                logger.error(f"음성채널 설정 중 오류 발생: {str(e)}")
-                await interaction_followup(interaction, f"음성채널 설정 중 오류가 발생했습니다: {str(e)}")
+                logger.error(f"음성채널 설정 인터페이스 생성 중 오류: {e}")
+                await interaction_followup(interaction, f"음성채널 설정 중 오류가 발생했습니다: {e}")
 
     @set_voice_channel.error
     async def voice_channel_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -339,9 +375,140 @@ class ChannelCog(commands.Cog):
             await interaction_response(interaction, "명령어 실행 중 오류가 발생했습니다.")
     
 
+class VoiceChannelSelectView(discord.ui.View):
+    def __init__(self, guild_id, channels, selected_channels):
+        super().__init__(timeout=300)  # 5분 타임아웃
+        self.guild_id = guild_id
+        self.channels = channels
+        self.selected_channels = selected_channels
+        
+        # Select 컴포넌트 생성 (다중 선택 가능)
+        options = []
+        for channel in self.channels:
+            options.append(
+                discord.SelectOption(
+                    label=channel.name,
+                    value=str(channel.id),
+                    default=str(channel.id) in self.selected_channels
+                )
+            )
+        
+        # 선택 메뉴 추가
+        select = discord.ui.Select(
+            placeholder="음성채널을 선택하세요 (여러 개 선택 가능)",
+            min_values=0,
+            max_values=len(options),
+            options=options
+        )
+        select.callback = self.on_select
+        self.add_item(select)
+        self.select = select
+        
+    async def on_select(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        
+        with SessionLocal() as db:
+            try:
+                # 현재 DB에 저장된 채널 ID 목록
+                current_channels = select_voice_channels(db, self.guild_id)
+                
+                # 새로 선택된 채널 ID 목록
+                selected_ids = self.select.values
+                
+                # 추가할 채널들 (새로 선택됨)
+                channels_to_add = [ch_id for ch_id in selected_ids if ch_id not in current_channels]
+                
+                # 제거할 채널들 (선택 해제됨)
+                channels_to_remove = [ch_id for ch_id in current_channels if ch_id not in selected_ids]
+                
+                # 데이터베이스 작업 먼저 수행
+                try:
+                    # 작업 수행
+                    for ch_id in channels_to_add:
+                        insert_voice_channel(db, self.guild_id, ch_id)
+                        
+                    for ch_id in channels_to_remove:
+                        delete_voice_channel(db, self.guild_id, ch_id)
+                    
+                    db.commit()
+                    logger.info(f"음성채널 설정 저장 완료: 추가 {len(channels_to_add)}개, 제거 {len(channels_to_remove)}개")
+                except Exception as db_error:
+                    logger.error(f"데이터베이스 작업 중 오류: {db_error}")
+                    db.rollback()
+                    await interaction.followup.send(f"데이터베이스 작업 중 오류가 발생했습니다: {db_error}", ephemeral=True)
+                    return
+                
+                # 메시지 구성
+                message_parts = []
+                if channels_to_add:
+                    channel_names = [discord.utils.get(self.channels, id=int(ch_id)).name for ch_id in channels_to_add]
+                    message_parts.append(f"추가된 채널: {', '.join(channel_names)}")
+                
+                if channels_to_remove:
+                    channel_names = [discord.utils.get(self.channels, id=int(ch_id)).name for ch_id in channels_to_remove if any(c.id == int(ch_id) for c in self.channels)]
+                    message_parts.append(f"제거된 채널: {', '.join(channel_names)}")
+                
+                if not message_parts:
+                    message = "변경된 채널이 없습니다."
+                else:
+                    message = "\n".join(message_parts)
+                
+                # 결과 메시지 전송
+                await interaction.followup.send(message, ephemeral=True)
+                
+            except Exception as e:
+                logger.error(f"음성채널 설정 저장 중 오류: {e}")
+                await interaction.followup.send(f"설정 저장 중 오류가 발생했습니다: {e}", ephemeral=True)
+                db.rollback()
+    
+    async def update_embed(self, interaction, selected_ids):
+        """임베드를 업데이트하여 현재 선택된 채널 표시"""
+        try:
+            # 선택된 채널 이름 목록
+            selected_channels = []
+            for ch_id in selected_ids:
+                channel = discord.utils.get(self.channels, id=int(ch_id))
+                if channel:
+                    selected_channels.append(f"• {channel.name} (ID: {ch_id})")
+            
+            # 임베드 생성
+            embed = discord.Embed(
+                title="음성채널 설정",
+                description="임시 음성채널 생성을 위한 부모 채널을 선택하세요.\n아래 선택된 채널들에 입장하면 자동으로 임시 채널이 생성됩니다.",
+                color=discord.Color.blue()
+            )
+            
+            if selected_channels:
+                embed.add_field(
+                    name="선택된 채널",
+                    value="\n".join(selected_channels),
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name="선택된 채널",
+                    value="아직 선택된 채널이 없습니다.",
+                    inline=False
+                )
+            
+            # 메시지 업데이트 - 오류 처리 추가
+            try:
+                await interaction.message.edit(embed=embed, view=self)
+                logger.info(f"음성채널 선택 메시지 업데이트 성공")
+            except discord.NotFound as e:
+                logger.warning(f"메시지를 찾을 수 없습니다: {e}")
+                # 기존 메시지를 찾을 수 없는 경우 새 메시지 전송
+                await interaction.followup.send("설정이 저장되었지만 표시를 업데이트할 수 없습니다. 명령어를 다시 실행해 현재 상태를 확인하세요.", ephemeral=True)
+            except discord.HTTPException as e:
+                logger.error(f"메시지 업데이트 중 HTTP 오류: {e}")
+                await interaction.followup.send("메시지 업데이트 중 오류가 발생했지만 설정은 저장되었습니다.", ephemeral=True)
+                
+        except Exception as e:
+            logger.error(f"임베드 업데이트 중 오류: {e}")
+            await interaction.followup.send("메시지 업데이트 중 오류가 발생했지만 설정은 저장되었습니다.", ephemeral=True)
+
 # ───────────────────────────────────────────────
 # Cog를 등록하는 설정 함수
 # ───────────────────────────────────────────────
 async def setup(bot):
     await bot.add_cog(ChannelCog(bot))
-

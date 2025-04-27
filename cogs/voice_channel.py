@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 from db.session import SessionLocal
 from core.utils import interaction_response, interaction_followup
-from queries.channel_query import select_voice_channel
+from queries.channel_query import select_voice_channels
 from queries.recruitment_query import select_recruitment, select_participants
 from queries.thread_query import update_complete_recruitment, select_complete_thread
 
@@ -22,12 +22,19 @@ class VoiceChannelCog(commands.Cog):
     async def on_voice_state_update(self, member, before, after):
         """음성 채널 상태가 변경될 때 호출되는 이벤트 리스너"""
         try:
+            # 디버그 로그 추가
+            # logger.info(f"음성 상태 변경: 사용자 {member.display_name} ({member.id}), "
+            #            f"이전: {before.channel.name if before.channel else 'None'}, "
+            #            f"이후: {after.channel.name if after.channel else 'None'}")
+            
             # 처음 음성채널 입장 시
             if before.channel is None and after.channel is not None:
+                # logger.info(f"사용자 {member.display_name}이(가) 채널 {after.channel.name} ({after.channel.id})에 입장함")
                 await self.handle_voice_join(member, after.channel)
             
             # 음성채널 퇴장 시
             elif before.channel is not None and (after.channel is None or after.channel.id != before.channel.id):
+                # logger.info(f"사용자 {member.display_name}이(가) 채널 {before.channel.name} ({before.channel.id})에서 퇴장함")
                 await self.handle_voice_leave(member, before.channel)
                 
         except Exception as e:
@@ -36,23 +43,34 @@ class VoiceChannelCog(commands.Cog):
     async def handle_voice_join(self, member, channel):
         """사용자가 음성 채널에 입장했을 때 처리"""
         try:
+            # 추가 로깅
+            # logger.info(f"음성 채널 입장 처리 시작: 사용자 {member.display_name}, 채널 {channel.name} ({channel.id})")
+            
             with SessionLocal() as db:
-                # 부모 음성채널 ID 조회
-                parent_voice_ch_id = select_voice_channel(db, member.guild.id)
+                # 부모 음성채널 ID 목록 조회 (새 테이블에서)
+                # logger.info(f"부모 음성채널 ID 목록 조회 시작: 길드 ID {member.guild.id}")
+                parent_voice_ch_ids = select_voice_channels(db, member.guild.id)
+                # logger.info(f"부모 음성채널 ID 목록 조회 결과: {parent_voice_ch_ids}")
                 
-                # 입장한 채널이 부모 음성채널이면 임시 채널 생성
-                if parent_voice_ch_id and str(channel.id) == parent_voice_ch_id:
+                # 입장한 채널이 부모 음성채널 중 하나인지 확인
+                if str(channel.id) in parent_voice_ch_ids:
+                    # logger.info(f"채널 {channel.id}는 부모 음성채널입니다. 임시 채널 생성 절차 시작.")
+                    
                     # 이미 임시 채널이 있는지 확인
                     if member.id in self.user_channels:
                         existing_channel_id = self.user_channels[member.id]
                         existing_channel = member.guild.get_channel(int(existing_channel_id))
                         if existing_channel:
+                            logger.info(f"사용자 {member.display_name}의 기존 임시 채널 발견: {existing_channel.name}")
                             # 기존 임시 채널로 이동
                             await member.move_to(existing_channel)
                             return
                     
                     # 임시 채널 생성
-                    await self.create_temp_voice_channel(member, parent_voice_ch_id)
+                    # logger.info(f"새 임시 채널 생성 시작: 사용자 {member.display_name}, 부모 채널 ID {channel.id}")
+                    await self.create_temp_voice_channel(member, str(channel.id))
+                else:
+                    logger.info(f"채널 {channel.id}는 부모 음성채널이 아닙니다. 설정된 부모 채널: {parent_voice_ch_ids}")
         except Exception as e:
             logger.error(f"음성 채널 입장 처리 중 오류 발생: {str(e)}")
 
