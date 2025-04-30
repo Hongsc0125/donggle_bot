@@ -482,7 +482,7 @@ class DeepCog(commands.Cog):
                        "• 이미 등록된 위치는 시간이 지날 때까지 중복 제보가 불가능합니다\n"
                        "• 3회 이상 신고가 누적되면 제보 정보가 자동 삭제됩니다\n"
                        "• 허위 제보 시 서버 이용에 제한을 받을 수 있습니다\n"
-                       "• 잘못 작성 하신분은 채팅채널에서 @관리자 를 태그해서 말씀해주세요.",
+                       "• 잘못 작성 하셨거나, 제보가 이상하면 채팅채널에서 `@힝트시` 를 호출해서 말씀해주세요.",
             color=discord.Color.dark_purple()
         ).set_thumbnail(url="https://harmari.duckdns.org/static/심층구멍.png")
         
