@@ -1,6 +1,13 @@
 pytz
 pydantic_settings
-discord
-psycopg2-binary
+discord.py==2.3.2
+aiohttp==3.9.3
+pydantic-settings
 PyNaCl
 sqlalchemy
+openai
+requests
+beautifulsoup4
+sentence-transformers
+faiss-cpu
+discord.py[voice]

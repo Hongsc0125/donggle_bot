@@ -3,7 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 import logging
 from datetime import datetime
-import traceback  # Add this import
+import traceback  
 
 from db.session import SessionLocal
 from core.utils import interaction_response, interaction_followup
@@ -12,7 +12,8 @@ from queries.channel_query import (
     select_guild_auth, select_super_user, update_thread_channel,
     update_voice_channel, update_alert_channel, insert_deep_pair,
     # 새 함수 추가
-    select_voice_channels, insert_voice_channel, delete_voice_channel
+    select_voice_channels, insert_voice_channel, delete_voice_channel,
+    insert_chatbot_channel, select_chatbot_channel
 )
 # from cogs.deep import initialize_deep_button
 
@@ -78,6 +79,30 @@ class ChannelCog(commands.Cog):
             except Exception as e:
                 logger.error(f"채널 페어링 중 오류 발생: {str(e)}")
                 await interaction_followup(interaction, f"채널 설정 중 오류가 발생했습니다: {str(e)}")
+
+    @is_super_user()
+    @app_commands.command(name="챗봇채널설정", description="챗봇이 대화할 채널을 설정합니다.")
+    @app_commands.describe(
+        채널="챗봇이 대화할 채널을 선택하세요.",
+    )
+    async def set_chatbot_channel(
+        self,
+        interaction: discord.Interaction,
+        채널: discord.TextChannel
+    ):
+        await interaction.response.defer(ephemeral=True)
+        
+        with SessionLocal() as db:
+            try:
+                # 챗봇 채널 설정
+                insert_chatbot_channel(db, interaction.guild.id, 채널.id)
+                db.commit()
+                
+                await interaction_followup(interaction, f"챗봇 채널이 {채널.mention}로 설정되었습니다.")
+            
+            except Exception as e:
+                logger.error(f"챗봇 채널 설정 중 오류 발생: {str(e)}")
+                await interaction_followup(interaction, f"챗봇 채널 설정 중 오류가 발생했습니다: {str(e)}")
 
     @is_super_user()
     @app_commands.command(name="길드인증", description="길드를 인증합니다.")

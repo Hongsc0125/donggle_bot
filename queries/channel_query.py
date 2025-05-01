@@ -307,3 +307,38 @@ def select_alert_channel(db, guild_id):
         'guild_id': str(guild_id)
     }).fetchone()
     return row[0] if row and row[0] else None
+
+
+INSERT_CHATBOT_CHANNEL = text('''
+    INSERT INTO guilds (
+        guild_id, 
+        chatbot_ch_id
+    ) VALUES (
+        :guild_id, 
+        :chatbot_ch_id
+    ) ON CONFLICT (guild_id) 
+    DO UPDATE SET 
+        chatbot_ch_id = :chatbot_ch_id,
+        update_dt = now()
+    RETURNING chatbot_ch_id
+''')
+
+def insert_chatbot_channel(db, guild_id, chatbot_ch_id):
+    """챗봇 채널 설정"""
+    return db.execute(INSERT_CHATBOT_CHANNEL, {
+        "guild_id": str(guild_id),
+        "chatbot_ch_id": str(chatbot_ch_id)
+    }).fetchone()
+
+# 챗봇 채널 조회 쿼리
+SELECT_CHATBOT_CHANNEL = text('''
+    SELECT chatbot_ch_id FROM guilds
+    WHERE guild_id = :guild_id
+''')
+
+def select_chatbot_channel(db, guild_id):
+    """특정 길드의 챗봇 채널 조회"""
+    result = db.execute(SELECT_CHATBOT_CHANNEL, {
+        "guild_id": str(guild_id)
+    }).fetchone()
+    return result[0] if result else None
