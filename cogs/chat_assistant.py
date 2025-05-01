@@ -4,8 +4,6 @@ import discord
 from discord.ext import commands, tasks
 from core.config import settings
 from openai import OpenAI
-import random
-import re
 from datetime import datetime
 from db.session import SessionLocal
 from queries.channel_query import select_chatbot_channel
@@ -14,7 +12,8 @@ from typing import List, Dict, Any, Optional
 # 로거 설정
 logger = logging.getLogger("cogs.chat_assistant")
 
-key="sk-2e02708457fc43f28472aa24a49b8b1e"
+key=settings.OPENAI_API_KEY
+
 
 class NonsenseChatbot(commands.Cog):
     """
@@ -30,7 +29,7 @@ class NonsenseChatbot(commands.Cog):
             api_key=key,
             base_url="https://api.deepseek.com/v1"
         )
-        
+
         # Discord 메시지 길이 제한
         self.MAX_DISCORD_LENGTH = 2000
         self.DEFAULT_MAX_TOKENS = 1000
@@ -190,6 +189,9 @@ class NonsenseChatbot(commands.Cog):
                     
                     # 응답 전송 (일반 채팅으로)
                     await message.channel.send(formatted_response)
+                    # print("ENV에서 불러온 값:", repr(keys))
+                    # print("하드코딩 값과 같은가?", keys == key)
+                    # print("길이 비교:", len(keys), len(key))
                     logger.info(f"'동글' 키워드에 대한 응답 전송 (채널: {message.channel.name}, 길이: {len(formatted_response)}자)")
         
         # 다른 메시지는 무시하고 비활성 채널 감지 로직이 처리하도록 함
