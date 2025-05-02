@@ -84,7 +84,7 @@ class NonsenseChatbot(commands.Cog):
             current_time = datetime.now()
             channels_to_check = []
             
-            # 활성 채널 목록 구성
+            # 활성 채널 목록 구성 - 챗봇 채널로 설정된 채널만 확인
             for guild_id, channel_id in self.chatbot_channels.items():
                 try:
                     channel = self.bot.get_channel(int(channel_id))
@@ -166,6 +166,14 @@ class NonsenseChatbot(commands.Cog):
         # 봇 메시지는 무시
         if message.author.bot:
             return
+        
+        # 현재 채널이 챗봇 채널인지 확인
+        with SessionLocal() as db:
+            chatbot_channel_id = select_chatbot_channel(db, message.guild.id)
+            
+            # 챗봇 채널이 설정되어 있고, 현재 채널이 챗봇 채널이 아니면 무시
+            if chatbot_channel_id and str(message.channel.id) != str(chatbot_channel_id):
+                return
         
         # 마지막 메시지 시간 업데이트
         channel_id = str(message.channel.id)
