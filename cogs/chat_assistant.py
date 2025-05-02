@@ -241,10 +241,26 @@ class NonsenseChatbot(commands.Cog):
             # 채팅 히스토리 포맷팅
             history_text = "\n".join(history[-30:]) if history else "대화 내역 없음"
             
-            # DeepSeek API를 사용하여 헛소리 응답 생성
-            system_prompt = """
-            당신은 모바일 MMORPG '마비노기 모바일'의 NPC입니다. 다음 캐릭터 중 상황에 맞는 인물로 역할극(Roleplay) 하세요:
-
+            # 랜덤한 캐릭터 선택을 강제하기 위해 타임스탬프 기반 시드 사용
+            import random
+            import time
+            
+            # 캐릭터 목록
+            characters = ["나오", "타르라크", "던컨", "티이", "카단", "마리", "루에리", "크리스텔", "마우러스", "모르간트"]
+            
+            # 현재 시간을 기반으로 시드 설정 (매번 다른 결과 보장)
+            random.seed(int(time.time()))
+            
+            # 랜덤 캐릭터 선택
+            selected_character = random.choice(characters)
+            
+            # 따옴표 사용 방식 변경 및 f-string 분리하여 에러 방지
+            system_prompt = f"""
+            당신은 모바일 MMORPG '마비노기 모바일'의 NPC입니다. 이번 대화에서는 반드시 '{selected_character}' 캐릭터로 역할극(Roleplay)하세요:
+            """
+            
+            # JSON 부분은 f-string이 아닌 일반 문자열로 처리
+            system_prompt += """
             {
             "characters": [
                 {
@@ -384,23 +400,29 @@ class NonsenseChatbot(commands.Cog):
                 "time_based": "아침/점심/저녁에 맞는 인사 포함"
                 },
                 "persona_selection": {
-                "auto_detect": "대화 주제, 톤, 지역에 따라 적절한 NPC를 자동 선택",
+                "auto_detect": "랜덤으로 NPC 자동 선택",
                 "fallback": "랜덤으로 NPC 선택"
                 }
             }
             }
-
-            <중요 규칙>
-            1. 반드시 NPC 역할에 몰입하여 대화할 것
-            2. 괄호 안 해설이나 메타 언어 사용 금지
-            3. 현실 세계 정보, 시스템 언급 절대 금지
-            4. 유저를 부를 때는 항상 '여행자님'이라고 지칭할 것
-            5. 응답 첫 줄에 NPC 이름과 간단한 상황을 명시할 것
-            6. 왜 그런 대답을 했는지 설명하거나 분석하지 말고, 무조건 Roleplay 응답만 출력할 것
-            7. 메시지 히스토리를 보고 최대한 중복되는 행동양식이나 대화는 피할 것
-            8. 대화의 흐름을 자연스럽게 이어가고, 유저가 흥미를 느낄 수 있도록 할 것
             """
             
+            system_prompt += f"""
+            <중요 규칙>
+            1. 이번 대화에서는 반드시 {selected_character} 캐릭터만 연기할 것! 다른 캐릭터로 바꾸지 말 것!
+            2. 대화의 히스토리 전체를 모두 읽고 대답할 것.
+            3. 반드시 NPC 역할에 몰입하여 대화할 것
+            4. 괄호 안 해설이나 메타 언어 사용 금지
+            5. 현실 세계 정보, 시스템 언급 절대 금지
+            6. 유저를 부를 때는 항상 '여행자님'이라고 지칭할 것
+            7. 응답 첫 줄에 '{selected_character}:'을 명시하고 바로 대화 시작할 것
+            8. 왜 그런 대답을 했는지 설명하거나 분석하지 말고, 무조건 Roleplay 응답만 출력할 것
+            9. 메시지 히스토리를 보고 최대한 중복되는 행동양식이나 대화는 피할 것
+            10. 대화의 흐름을 자연스럽게 이어가고, 유저가 흥미를 느낄 수 있도록 할 것
+            11. "동글" 이라는 단어는 트리거이므로 대화에서 무시할 것
+            """
+            
+            logger.info(f"선택된 캐릭터: {selected_character}")
             
             messages = [
                 {"role": "system", "content": system_prompt},
