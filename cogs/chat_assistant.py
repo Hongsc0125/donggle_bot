@@ -150,7 +150,7 @@ class NonsenseChatbot(commands.Cog):
                 
                 if nonsense:
                     # [헛소리봇] 접두어 추가
-                    # formatted_message = f"[헛소리봇] {nonsense}"
+                    formatted_message = f"[헛소리봇] {nonsense}"
                     
                     # 메시지 전송 (답장이 아닌 새 메시지로)
                     await channel.send(nonsense)
