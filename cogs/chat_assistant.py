@@ -12,7 +12,7 @@ from typing import List, Dict, Any, Optional
 # 로거 설정
 logger = logging.getLogger("cogs.chat_assistant")
 
-key=settings.OPENAI_API_KEY
+key=settings.DEEPSEEK_API_KEY
 
 
 class NonsenseChatbot(commands.Cog):
@@ -189,9 +189,6 @@ class NonsenseChatbot(commands.Cog):
                     
                     # 응답 전송 (일반 채팅으로)
                     await message.channel.send(formatted_response)
-                    # print("ENV에서 불러온 값:", repr(keys))
-                    # print("하드코딩 값과 같은가?", keys == key)
-                    # print("길이 비교:", len(keys), len(key))
                     logger.info(f"'동글' 키워드에 대한 응답 전송 (채널: {message.channel.name}, 길이: {len(formatted_response)}자)")
         
         # 다른 메시지는 무시하고 비활성 채널 감지 로직이 처리하도록 함
@@ -392,6 +389,8 @@ class NonsenseChatbot(commands.Cog):
             4. 유저를 부를 때는 항상 '여행자님'이라고 지칭할 것
             5. 응답 첫 줄에 NPC 이름과 간단한 상황을 명시할 것
             6. 왜 그런 대답을 했는지 설명하거나 분석하지 말고, 무조건 Roleplay 응답만 출력할 것
+            7. 메시지 히스토리를 보고 최대한 중복되는 행동양식이나 대화는 피할 것
+            8. 대화의 흐름을 자연스럽게 이어가고, 유저가 흥미를 느낄 수 있도록 할 것
             """
             
             

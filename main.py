@@ -25,6 +25,22 @@ intents = discord.Intents.all()
 class Donggle(commands.Bot):
     def __init__(self):
         logger.info("Donggle Bot 시작")
+
+        # 환경 변수들 체크
+        logger.info("--------------------------------------------------------------------------------------------------------")
+        logger.info(f"DB URL: {settings.DATABASE_URL}")
+        logger.info(f"DB USER: {settings.DB_USER}")
+        logger.info(f"DB NAME: {settings.DATABASE_NAME}")
+        logger.info(f"DB PW: {settings.DB_PW}")
+        logger.info(f"DISCORD_TOKEN: {settings.DISCORD_TOKEN}")
+        logger.info(f"APPLICATION_ID: {settings.APPLICATION_ID}")
+        logger.info(f"PUBLIC_KEY: {settings.PUBLIC_KEY}")
+        logger.info(f"OPENAI_API_KEY: {settings.OPENAI_API_KEY}")
+        logger.info(f"DEEPSEEK_API_KEY: {settings.DEEPSEEK_API_KEY}")
+        logger.info(f"ENV: {settings.ENV}")
+        logger.info("--------------------------------------------------------------------------------------------------------")
+
+
         kwargs = {
             "command_prefix": commands.when_mentioned,  # 프리픽스 명령어 비활성화
             "intents": intents,

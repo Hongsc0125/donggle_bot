@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     # openai
     OPENAI_API_KEY: str
+    DEEPSEEK_API_KEY: str
 
     # ENV
     ENV: str

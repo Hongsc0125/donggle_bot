@@ -41,8 +41,9 @@ jobs:
           APPLICATION_ID=${{ secrets.APPLICATION_ID }}
           PUBLIC_KEY=${{ secrets.PUBLIC_KEY }}
 
-          # OPENAI
+          # AIKeys
           OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
 
           # ENV
           ENV=${{ secrets.ENV }}
