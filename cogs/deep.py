@@ -105,7 +105,7 @@ class DeepReportConfirmModal(discord.ui.Modal, title="신고 확인"):
                         try:
                             # 메시지 내용 갱신을 위해 DeepCog 참조
                             deep_cog = interaction.client.get_cog("DeepCog")
-                            if deep_cog and hasattr(deep_cog, "mark_error_message"):
+                            if (deep_cog and hasattr(deep_cog, "mark_error_message")):
                                 await deep_cog.mark_error_message(interaction.message, self.deep_id)
                                 await interaction_followup(interaction, "관리자 권한으로 즉시 오제보 처리되었습니다.", ephemeral=True)
                             else:
@@ -170,11 +170,14 @@ class TimeInputModal(discord.ui.Modal, title="심층 제보"):
         self.add_item(self.time_input)
 
     async def on_submit(self, interaction: discord.Interaction):
+        # 즉시 응답 지연 처리 - 3초 제한을 피하기 위해 가장 먼저 호출
+        await interaction.response.defer(ephemeral=True)
+        
         try:
             # 입력 검증
             remaining_minutes = int(self.time_input.value)
             if (remaining_minutes <= 0 or remaining_minutes > 999):
-                await interaction_response(interaction, "남은 시간은 1~999 사이의 숫자로 입력해주세요.", ephemeral=True)
+                await interaction.followup.send("남은 시간은 1~999 사이의 숫자로 입력해주세요.", ephemeral=True)
                 return
                 
             # 제보 정보 생성
@@ -186,13 +189,13 @@ class TimeInputModal(discord.ui.Modal, title="심층 제보"):
                 if (recent_deep):
                     # 남은 시간 계산
                     time_left = int(recent_deep["remaining_minutes"])
-                    await interaction_response(interaction, f"이미 {location}에 대한 정보가 등록되어 있습니다. {time_left}분 후에 다시 시도해주세요.", ephemeral=True)
+                    await interaction.followup.send(f"이미 {location}에 대한 정보가 등록되어 있습니다. {time_left}분 후에 다시 시도해주세요.", ephemeral=True)
                     return
                 
                 # 채널에 매핑된 권한 가져오기
                 deep_guild_auth = select_deep_auth_by_channel(db, interaction.guild.id, self.channel_id)
                 if not deep_guild_auth:
-                    await interaction_response(interaction, "채널에 권한 매핑이 설정되어 있지 않습니다.", ephemeral=True)
+                    await interaction.followup.send("채널에 권한 매핑이 설정되어 있지 않습니다.", ephemeral=True)
                     return
             
             # 제보자 정보 저장 (remaining_minutes, deep_ch_id 추가)
@@ -216,12 +219,12 @@ class TimeInputModal(discord.ui.Modal, title="심층 제보"):
                         logger.info(f"심층 제보자 정보 저장 성공: {interaction.user.display_name}, {location}, 채널: {self.channel_id}")
                     else:
                         logger.warning(f"심층 제보자 정보 저장 실패: {interaction.user.display_name}, {location}")
-                        await interaction_response(interaction, "심층 제보 등록에 실패했습니다.", ephemeral=True)
+                        await interaction.followup.send("심층 제보 등록에 실패했습니다.", ephemeral=True)
                         return
                 except Exception as e:
                     logger.error(f"심층 제보자 정보 저장 중 오류: {str(e)}")
                     db.rollback()
-                    await interaction_response(interaction, "제보 처리 중 오류가 발생했습니다.", ephemeral=True)
+                    await interaction.followup.send("제보 처리 중 오류가 발생했습니다.", ephemeral=True)
                     return
             
             # 제보 임베드 생성
@@ -249,9 +252,6 @@ class TimeInputModal(discord.ui.Modal, title="심층 제보"):
                 update_deep_message_id(db, deep_id, channel_message.id)
                 db.commit()
             
-            # 원본 대화상자 응답
-            await interaction.response.defer(ephemeral=True)
-            
             # 원본 메시지 (임베드와 select box) 삭제 시도
             try:
                 # 원래 상호작용이 발생한 메시지의 ID 저장
@@ -271,6 +271,9 @@ class TimeInputModal(discord.ui.Modal, title="심층 제보"):
             # DM 전송 처리 - 권한 그룹별 알림 전송
             await self.send_notifications(interaction, location, remaining_minutes, deep_guild_auth, deep_id)
             
+            # 성공 메시지 전송
+            await interaction.followup.send("심층 제보가 성공적으로 등록되었습니다.", ephemeral=True)
+            
             # 버튼 메시지 초기화
             await asyncio.sleep(1)  # 약간의 지연을 주어 UI 갱신 안정화
             cog = interaction.client.get_cog("DeepCog")
@@ -278,10 +281,11 @@ class TimeInputModal(discord.ui.Modal, title="심층 제보"):
                 await cog.initialize_deep_button(interaction.channel.id, deep_guild_auth)
                 
         except ValueError:
-            await interaction_response(interaction, "남은 시간은 숫자로 입력해주세요.", ephemeral=True)
+            await interaction.followup.send("남은 시간은 숫자로 입력해주세요.", ephemeral=True)
         except Exception as e:
             logger.error(f"심층 제보 처리 중 오류: {str(e)}")
-            await interaction_response(interaction, "제보 처리 중 오류가 발생했습니다.", ephemeral=True)
+            logger.error(traceback.format_exc())  # 상세 오류 로그 추가
+            await interaction.followup.send("제보 처리 중 오류가 발생했습니다.", ephemeral=True)
 
     async def send_notifications(self, interaction, location, remaining_minutes, deep_guild_auth, deep_id):
         with SessionLocal() as db:
@@ -653,26 +657,17 @@ class DeepCog(commands.Cog):
             logger.info(f"채널 {channel_id} 메시지 상태 분류: 오제보 {len(error_deep_ids)}개, " + 
                         f"만료됨 {len(expired_deep_ids)}개, 유효함 {len(valid_deep_ids)}개")
             
-            # 2. 각 메시지 상태에 따라 처리
+            # 2. 각 메시지 상태에 따라 처리 - 유효한 메시지만 업데이트
             updated_count = 0
             for deep_id, message in deep_report_messages.items():
                 try:
-                    if deep_id in error_deep_ids:
-                        # 오제보 메시지 처리 - 라벨 변경, 신고 버튼 비활성화
-                        result = await self.mark_error_message(message, deep_id)
-                        if result:
-                            updated_count += 1
-                            logger.info(f"오제보 메시지 {deep_id} 상태 업데이트 완료")
-                    elif deep_id in expired_deep_ids:
-                        # 만료된 메시지 처리 - 버튼 비활성화
-                        logger.info(f"만료된 메시지 처리 시작: {deep_id}")
-                        result = await self.mark_expired_message(message, deep_id)
-                        if result:
-                            updated_count += 1
-                            logger.info(f"만료 메시지 {deep_id} 상태 업데이트 완료")
-                        else:
-                            logger.warning(f"만료 메시지 {deep_id} 상태 업데이트 실패")
-                    elif deep_id in valid_deep_ids:
+                    # 이미 오제보나 만료 상태인 메시지는 업데이트 하지 않음
+                    if deep_id in error_deep_ids or deep_id in expired_deep_ids:
+                        logger.debug(f"이미 오제보 또는 만료된 메시지 {deep_id} 업데이트 스킵")
+                        continue
+                        
+                    # 유효한 메시지만 업데이트
+                    if deep_id in valid_deep_ids:
                         # 유효한 메시지 처리 - 상호작용 갱신
                         result = await self.refresh_valid_message(message, deep_id)
                         if result:
@@ -687,20 +682,50 @@ class DeepCog(commands.Cog):
             
             logger.info(f"채널 {channel_id}에서 총 {updated_count}개 메시지 상태 업데이트 완료")
             
-            # 3. Select 메시지 처리 - 항상 1개만 유지하고 나머지는 삭제
-            if len(select_messages) > 1:
-                # 가장 최근 메시지를 제외하고 나머지 삭제
-                for old_message in select_messages[1:]:
-                    try:
-                        await old_message.delete()
-                        logger.info(f"중복된 Select 메시지 삭제: {old_message.id}")
-                    except Exception as e:
-                        logger.error(f"Select 메시지 삭제 중 오류: {e}")
+            # 3. Select 메시지 처리 - 반드시 채널의 가장 마지막에 위치하도록 관리
+            try:
+                # 현재 채널의 가장 최근 메시지 확인
+                last_message = None
+                async for msg in channel.history(limit=1):
+                    last_message = msg
+                    break
+                
+                # 양식 메시지가 채널의 마지막 메시지가 아니거나 없는 경우
+                needs_new_select = False
+                
+                if not select_messages:
+                    # 양식 메시지가 없는 경우 신규 생성 필요
+                    needs_new_select = True
+                    logger.info(f"양식 메시지가 없어 새로 생성합니다.")
+                elif last_message and select_messages[0].id != last_message.id:
+                    # 양식 메시지가 마지막 메시지가 아닌 경우 기존 메시지 삭제 후 신규 생성
+                    needs_new_select = True
+                    logger.info(f"양식 메시지가 마지막 메시지가 아니어서 재생성합니다.")
+                
+                # 신규 양식 메시지 생성이 필요한 경우
+                if needs_new_select:
+                    # 기존 양식 메시지 모두 삭제
+                    for old_select in select_messages:
+                        try:
+                            await old_select.delete()
+                            logger.info(f"기존 양식 메시지 삭제: {old_select.id}")
+                        except Exception as del_err:
+                            logger.error(f"양식 메시지 삭제 중 오류: {del_err}")
+                    
+                    # 새 양식 메시지 생성
+                    await self.initialize_deep_button(channel_id, auth)
+                else:
+                    # 중복된 양식 메시지만 삭제 (첫 번째 메시지 유지)
+                    if len(select_messages) > 1:
+                        for old_message in select_messages[1:]:
+                            try:
+                                await old_message.delete()
+                            except Exception as e:
+                                logger.error(f"Select 메시지 삭제 중 오류: {e}")
             
-            # Select 메시지가 없으면 새로 생성
-            if not select_messages:
-                await self.initialize_deep_button(channel_id, auth)
-            
+            except Exception as e:
+                logger.error(f"Select 메시지 처리 중 오류: {e}")
+        
         except Exception as e:
             logger.error(f"심층 채널 {channel_id} 메시지 관리 중 오류: {e}")
             logger.error(traceback.format_exc())
