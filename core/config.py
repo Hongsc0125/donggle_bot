@@ -1,13 +1,9 @@
 # app/core/config.py
-import os
-import logging
+from pydantic_settings import BaseSettings
 from datetime import datetime
-from urllib.parse import quote_plus
-
-from functools import lru_cache
-
 import pytz
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from urllib.parse import quote_plus
+import logging
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +26,9 @@ class Settings(BaseSettings):
     # ENV
     ENV: str
 
-    # Pydantic v2 방식의 환경 설정
-    model_config = SettingsConfigDict(
-        env_file=os.path.join(os.path.dirname(__file__), ".env"),
-        env_file_encoding='utf-8'
-    )
+    class Config:
+        env_file = '.env'
+        env_file_encoding = 'utf-8'
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -46,11 +40,5 @@ class Settings(BaseSettings):
     def CURRENT_DATETIME(self) -> str:
         kst = pytz.timezone('Asia/Seoul')
         return datetime.now(kst).isoformat()
-    
 
-@lru_cache()
-def get_settings():
-    return Settings()
-
-get_settings.cache_clear()
-settings = get_settings()
+settings = Settings()
