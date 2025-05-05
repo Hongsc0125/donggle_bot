@@ -45,6 +45,11 @@ class NonsenseChatbot(commands.Cog):
         # 채널 목록 캐시
         self.chatbot_channels = {}
         
+        # 페르소나 추적 - 메시지 ID와 사용된 캐릭터를 연결
+        self.persona_history = {}  # {message_id: character_name}
+        # 채널별 마지막 사용 페르소나
+        self.last_used_persona = {}  # {channel_id: character_name}
+        
         # 비활성 채널 감지 백그라운드 작업 시작
         self.check_inactive_channels.start()
     
@@ -145,16 +150,29 @@ class NonsenseChatbot(commands.Cog):
         try:
             # 채널에 타이핑 시작
             async with channel.typing():
+                # 자동 헛소리 생성 - 채널의 마지막 페르소나 사용 또는 새로 선택
+                channel_id = str(channel.id)
+                last_persona = self.last_used_persona.get(channel_id)
+                
                 # 자동 헛소리 생성
-                nonsense = await self.generate_nonsense("", history, is_auto=True)
+                nonsense = await self.generate_nonsense("", history, is_auto=True, forced_character=last_persona)
                 
                 if nonsense:
+                    # 응답에서 캐릭터 이름 추출
+                    character_name, content = self.extract_character_name(nonsense)
+                    
                     # [헛소리봇] 접두어 추가
-                    formatted_message = f"[헛소리봇] {nonsense}"
+                    formatted_message = f"[헛소리봇] {content}"
                     
                     # 메시지 전송 (답장이 아닌 새 메시지로)
-                    await channel.send(nonsense)
-                    logger.info(f"비활성 채널 {channel.name}에 자동 헛소리 전송 (길이: {len(nonsense)}자)")
+                    message = await channel.send(formatted_message)
+                    
+                    # 페르소나 추적 업데이트
+                    if character_name:
+                        self.persona_history[str(message.id)] = character_name
+                        self.last_used_persona[channel_id] = character_name
+                    
+                    logger.info(f"비활성 채널 {channel.name}에 자동 헛소리 전송 (캐릭터: {character_name}, 길이: {len(content)}자)")
         except Exception as e:
             logger.error(f"자동 헛소리 전송 중 오류: {e}")
     
@@ -182,22 +200,55 @@ class NonsenseChatbot(commands.Cog):
         # 메시지 히스토리에 추가
         self.add_to_history(message)
             
-        # 봇이 언급되었거나 "동글" 키워드가 있는 경우에만 응답
-        if self.bot.user.mentioned_in(message) or "동글" in message.content.lower():
+        # 봇이 언급되었거나 "동글" 키워드가 있거나 봇의 메시지에 답장하는 경우
+        is_reply_to_bot = message.reference and message.reference.resolved and message.reference.resolved.author.id == self.bot.user.id
+        
+        if self.bot.user.mentioned_in(message) or "동글" in message.content.lower() or is_reply_to_bot:
             async with message.channel.typing():
                 # 채널 히스토리 가져오기
                 history = self.get_channel_history(message.channel.id)
                 
-                # 헛소리 응답 생성
-                response = await self.generate_nonsense(message.content, history)
+                # 이전 페르소나 확인 - 봇 메시지에 답장하는 경우
+                forced_character = None
+                if is_reply_to_bot:
+                    referenced_msg_id = str(message.reference.message_id)
+                    forced_character = self.persona_history.get(referenced_msg_id)
+                    logger.info(f"메시지 {referenced_msg_id}에 대한 답장. 이전 캐릭터: {forced_character}")
+                
+                # 채널 마지막 페르소나 (없으면 새로 선택)
+                if not forced_character:
+                    forced_character = self.last_used_persona.get(channel_id)
+                
+                # 헛소리 응답 생성 - 이전 페르소나 사용
+                response = await self.generate_nonsense(message.content, history, forced_character=forced_character)
                 
                 if response:
-                    # [헛소리봇] 접두어 추가
-                    formatted_response = f"[헛소리봇] {response}"
+                    # 응답에서 캐릭터 이름 추출
+                    character_name, content = self.extract_character_name(response)
                     
-                    # 응답 전송 (일반 채팅으로)
-                    await message.channel.send(formatted_response)
-                    logger.info(f"'동글' 키워드에 대한 응답 전송 (채널: {message.channel.name}, 길이: {len(formatted_response)}자)")
+                    # [헛소리봇] 접두어 추가
+                    formatted_response = f"[헛소리봇] {content}"
+                    
+                    # 응답 전송 (답장 형식으로) - message.reply를 사용하여 대화맥락 유지
+                    try:
+                        reply_msg = await message.reply(formatted_response, mention_author=False)
+                        
+                        # 페르소나 추적 업데이트
+                        if character_name:
+                            self.persona_history[str(reply_msg.id)] = character_name
+                            self.last_used_persona[channel_id] = character_name
+                            
+                        logger.info(f"대화 응답 전송 (캐릭터: {character_name}, 채널: {message.channel.name}, 길이: {len(formatted_response)}자)")
+                    except Exception as e:
+                        # 답장 실패 시 일반 메시지로
+                        sent_msg = await message.channel.send(formatted_response)
+                        
+                        # 페르소나 추적 업데이트
+                        if character_name:
+                            self.persona_history[str(sent_msg.id)] = character_name
+                            self.last_used_persona[channel_id] = character_name
+                            
+                        logger.warning(f"답장 실패로 일반 메시지 전송: {e}")
         
         # 다른 메시지는 무시하고 비활성 채널 감지 로직이 처리하도록 함
     
@@ -232,10 +283,45 @@ class NonsenseChatbot(commands.Cog):
             
         return formatted_history
 
-    async def generate_nonsense(self, context: str, history: List[str], is_auto=False) -> Optional[str]:
+    def extract_character_name(self, response):
+        """응답 텍스트에서 캐릭터 이름 추출"""
+        try:
+            # 캐릭터 이름이 '이름:' 형식으로 시작하는지 확인
+            lines = response.split('\n', 1)
+            first_line = lines[0].strip()
+            
+            # 이름: 형식이나 이름 (상황설명): 형식 확인
+            colon_pos = first_line.find(':')
+            if colon_pos > 0:
+                character_name = first_line[:colon_pos].strip()
+                
+                # 괄호가 있는 경우 괄호 이전까지만 추출
+                if '(' in character_name:
+                    character_name = character_name.split('(')[0].strip()
+                
+                # 캐릭터 이름 유효성 검사 - 알려진 캐릭터인지
+                valid_characters = ["나오", "타르라크", "던컨", "티이", "카단", "마리", "루에리", "크리스텔", "마우러스", "모르간트"]
+                if character_name in valid_characters:
+                    # 첫 줄(캐릭터 이름)을 제외한 내용 반환
+                    content = response[colon_pos+1:].strip()
+                    
+                    # 줄바꿈이 있었으면 포함
+                    if len(lines) > 1:
+                        content = content + "\n" + lines[1]
+                        
+                    return character_name, content
+            
+            # 형식에 맞지 않으면 원본 반환
+            return None, response
+        except Exception as e:
+            logger.error(f"캐릭터 이름 추출 중 오류: {e}")
+            return None, response
+
+    async def generate_nonsense(self, context: str, history: List[str], is_auto=False, forced_character=None) -> Optional[str]:
         """
         사용자 입력과 대화 히스토리를 기반으로 엉뚱하고 재미있는 응답을 생성합니다.
         is_auto: 자동 생성 여부 (True인 경우 대화 촉진 역할)
+        forced_character: 강제할 캐릭터 이름 (대화 연속성을 위해)
         """
         try:
             # 채팅 히스토리 포맷팅
@@ -248,11 +334,15 @@ class NonsenseChatbot(commands.Cog):
             # 캐릭터 목록
             characters = ["나오", "타르라크", "던컨", "티이", "카단", "마리", "루에리", "크리스텔", "마우러스", "모르간트"]
             
-            # 현재 시간을 기반으로 시드 설정 (매번 다른 결과 보장)
-            random.seed(int(time.time()))
-            
-            # 랜덤 캐릭터 선택
-            selected_character = random.choice(characters)
+            # 이전 대화의 캐릭터가 있으면 해당 캐릭터 사용, 없으면 랜덤 선택
+            if forced_character and forced_character in characters:
+                selected_character = forced_character
+                logger.info(f"이전 대화의 캐릭터 계속 사용: {selected_character}")
+            else:
+                # 현재 시간을 기반으로 시드 설정 (매번 다른 결과 보장)
+                random.seed(int(time.time()))
+                selected_character = random.choice(characters)
+                logger.info(f"새 캐릭터 선택됨: {selected_character}")
             
             # 따옴표 사용 방식 변경 및 f-string 분리하여 에러 방지
             system_prompt = f"""
@@ -415,11 +505,12 @@ class NonsenseChatbot(commands.Cog):
             4. 괄호 안 해설이나 메타 언어 사용 금지
             5. 현실 세계 정보, 시스템 언급 절대 금지
             6. 유저를 부를 때는 항상 '여행자님'이라고 지칭할 것
-            7. 응답 첫 줄에 '{selected_character}:'을 명시하고 바로 대화 시작할 것
+            7. 응답 첫 줄에 반드시 '{selected_character}:'을 명시하고 바로 대화 시작할 것 (다른 형식 사용 금지)
             8. 왜 그런 대답을 했는지 설명하거나 분석하지 말고, 무조건 Roleplay 응답만 출력할 것
             9. 메시지 히스토리를 보고 최대한 중복되는 행동양식이나 대화는 피할 것
             10. 대화의 흐름을 자연스럽게 이어가고, 유저가 흥미를 느낄 수 있도록 할 것
             11. "동글" 이라는 단어는 트리거이므로 대화에서 무시할 것
+            12. 응답 시작에 "{selected_character}:" 외의 다른 형식 사용하지 말 것
             """
             
             logger.info(f"선택된 캐릭터: {selected_character}")

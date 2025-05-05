@@ -105,7 +105,7 @@ class ChannelCog(commands.Cog):
                 await interaction_followup(interaction, f"챗봇 채널 설정 중 오류가 발생했습니다: {str(e)}")
 
     @is_super_user()
-    @app_commands.command(name="길드인증", description="길드를 인증합니다.")
+    @app_commands.command(name="길드인증", description="길드를 인증합니다. 모든 기능은 길드인증을 받아야 사용 가능합니다.")
     @app_commands.describe(
         유효기간="길드등록 유효기간 입력 (예: 20251231)",
     )
