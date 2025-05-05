@@ -102,7 +102,7 @@ jobs:
                 
                 # Check if bot is running
                 sleep 5
-                if pgrep -f "python main.py" > /dev/null; then
+                if pgrep -f "python3.12 main.py" > /dev/null; then
                   echo ">>> Bot successfully started!"
                 else
                   echo ">>> Failed to start bot. Check log files."
