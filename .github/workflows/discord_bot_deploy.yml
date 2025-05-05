@@ -91,13 +91,13 @@ jobs:
                 source .venv/bin/activate
                 
                 echo ">>> Installing requirements..."
-                pip install -r requirements.txt
+                pip3.12 install -r requirements.txt
                 
                 echo ">>> Stopping existing bot process..."
                 pkill -f "python main.py" || echo "No bot process found"
                 
                 echo ">>> Starting Discord bot in background..."
-                nohup python main.py > bot.log 2>&1 &
+                nohup python3.12 main.py > bot.log 2>&1 &
                 echo ">>> Done. Discord bot is running in background."
                 
                 # Check if bot is running
