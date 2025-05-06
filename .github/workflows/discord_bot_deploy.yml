@@ -89,6 +89,6 @@ jobs:
               -o StrictHostKeyChecking=no \
               ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} 'bash -s' << 'EOSSH'
                 cd ${{ secrets.REMOTE_TARGET }}
-                chmod +x start.sh
+                chmod +x start.sh stop.sh
                 ./start.sh
           EOSSH
