@@ -86,26 +86,6 @@ jobs:
               -o StrictHostKeyChecking=no \
               ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} 'bash -s' << 'EOSSH'
                 cd ${{ secrets.REMOTE_TARGET }}
-                
-                echo ">>> Activating virtual environment..."
-                source .venv/bin/activate
-                
-                echo ">>> Installing requirements..."
-                pip3.12 install -r requirements.txt
-                
-                echo ">>> Stopping existing bot process..."
-                pkill -f "python main.py" || echo "No bot process found"
-                
-                echo ">>> Starting Discord bot in background..."
-                nohup python3.12 main.py > bot.log 2>&1 &
-                echo ">>> Done. Discord bot is running in background."
-                
-                # Check if bot is running
-                sleep 5
-                if pgrep -f "python3.12 main.py" > /dev/null; then
-                  echo ">>> Bot successfully started!"
-                else
-                  echo ">>> Failed to start bot. Check log files."
-                  exit 1
-                fi
+                chmod +x start.sh
+                ./start.sh
           EOSSH

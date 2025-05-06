@@ -58,7 +58,8 @@ class Donggle(commands.Bot):
             "cogs.voice_channel",
             "cogs.deep",
             "cogs.alert",
-            "cogs.chat_assistant"
+            "cogs.chat_assistant",
+            "cogs.rank"
         ]
         for ext in extensions:
             try:

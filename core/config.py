@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # ENV
     ENV: str
 
+    # rankapiurl
+    RANK_API_URL: str
+
     class Config:
         env_file = '.env'
         env_file_encoding = 'utf-8'
