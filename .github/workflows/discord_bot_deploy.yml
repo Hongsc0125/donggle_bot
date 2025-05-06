@@ -47,6 +47,9 @@ jobs:
 
           # ENV
           ENV=${{ secrets.ENV }}
+
+          # RANK_API
+          RANK_API_URL=${{ secrets.RANK_API_URL }}
           
           EOF
           cat .env
