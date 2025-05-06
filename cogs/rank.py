@@ -56,16 +56,14 @@ class RankModal(discord.ui.Modal, title='캐릭터 랭킹 조회'):
                         )
                         return
                     
-                    # 캐릭터 정보 추출
+                    # 캐릭터 정보 추출 및 키 매핑
                     character_info = result.get("character", {})
-                    
-                    # 캐릭터 정보 가져오기
-                    character_name = character_info.get("character_name", "알 수 없음")
-                    server_name = character_info.get("server_name", "알 수 없음")
-                    class_name = character_info.get("class_name", "알 수 없음")
-                    rank_position = character_info.get("rank_position", "알 수 없음")
-                    power_value = character_info.get("power_value", "알 수 없음")
-                    change_amount = character_info.get("change_amount", 0)
+                    character_name = character_info.get("character") or character_info.get("character_name", "알 수 없음")
+                    server_name = character_info.get("server") or character_info.get("server_name", "알 수 없음")
+                    class_name = character_info.get("class") or character_info.get("class_name", "알 수 없음")
+                    rank_position = character_info.get("rank") or character_info.get("rank_position", "알 수 없음")
+                    power_value = character_info.get("power") or character_info.get("power_value", "알 수 없음")
+                    change_amount = character_info.get("change") or character_info.get("change_amount", 0)
                     change_type = character_info.get("change_type", "none")
                     
                     # 순위 변동에 따른 색상 및 아이콘 결정

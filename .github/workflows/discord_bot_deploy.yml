@@ -82,13 +82,13 @@ jobs:
               .env \
               ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }}:${{ secrets.REMOTE_TARGET }}
 
-      - name: Install dependencies and restart bot
-        run: |
-          ssh -p ${{ secrets.REMOTE_PORT }} \
-              -i ~/.ssh/id_rsa \
-              -o StrictHostKeyChecking=no \
-              ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} 'bash -s' << 'EOSSH'
-                cd ${{ secrets.REMOTE_TARGET }}
-                chmod +x start.sh stop.sh
-                ./start.sh
-          EOSSH
+      # - name: Install dependencies and restart bot
+      #   run: |
+      #     ssh -p ${{ secrets.REMOTE_PORT }} \
+      #         -i ~/.ssh/id_rsa \
+      #         -o StrictHostKeyChecking=no \
+      #         ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} 'bash -s' << 'EOSSH'
+      #           cd ${{ secrets.REMOTE_TARGET }}
+      #           chmod +x start.sh stop.sh
+      #           ./start.sh
+      #     EOSSH
