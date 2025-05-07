@@ -3,7 +3,7 @@ import logging
 import asyncio
 from db.session import SessionLocal
 from datetime import datetime
-from core.utils import interaction_response, interaction_followup
+from core.utils import interaction_response, interaction_followup, execute_concurrently
 from queries.recruitment_query import select_recruitment, select_participants, insert_participants, select_participants_check
 from queries.recruitment_query import update_recruitment_status, delete_participants
 from core.config import settings
@@ -85,62 +85,64 @@ def build_recruitment_embed(
 class RecruitmentListButtonView(discord.ui.View):
     def __init__(self, show_apply=True, show_cancel=True, show_complete=True, show_cancel_recruit=True, recru_id=None):
         super().__init__(timeout=None)
+        
+        # DB 세션 관리 개선
+        self.recru_id = recru_id
+        self.recruitment_result = None
+        self.participants_list = []
 
+        # 비동기로 데이터 로드
+        asyncio.create_task(self.load_data())
+
+    async def load_data(self):
+        """비동기 데이터 로드"""
         db = SessionLocal()
-
         try:
-            self.recru_id = recru_id
-            self.recruitment_result = select_recruitment(db, recru_id)
+            self.recruitment_result = select_recruitment(db, self.recru_id)
             
             if self.recruitment_result is None:
                 logger.error("모집이 존재하지 않습니다.")
                 return
             
-            self.participants_list = select_participants(db, recru_id) or []
+            self.participants_list = select_participants(db, self.recru_id) or []
             self.remove_all_buttons(self.recruitment_result["status_code"])
-
 
         except Exception as e:
             logger.error(f"리스트 버튼 생성중 오류: {e}")
             return
-
         finally:
             db.close()
 
-
-    # ───────────────────────────────────────────────
-    #             지원하기 버튼 & 기능
-    # ───────────────────────────────────────────────
+    # 지원하기 버튼 & 기능
     @discord.ui.button(label="지원하기", style=discord.ButtonStyle.primary, custom_id="apply")
     async def apply(self, interaction: discord.Interaction, button: discord.ui.Button):
-
+        # 응답 지연 설정
+        await interaction.response.defer(ephemeral=True)
+        
         db = SessionLocal()
         try:
             recru_id = interaction.message.embeds[0].footer.text
             user = interaction.user
 
-            recruitment_result = select_recruitment(db, recru_id)
+            # DB 접근 최적화 - 필요한 정보만 한 번에 가져오기
+            tasks = [
+                self.fetch_recruitment(db, recru_id),
+                self.fetch_participants(db, recru_id)
+            ]
+            
+            # 비동기 작업 동시 실행
+            results = await execute_concurrently(tasks)
+            recruitment_result = results[0]
+            participants_list = results[1]
             
             if recruitment_result is None:
-                await interaction_response(interaction, "❌ 모집이 존재하지 않습니다.")
+                await interaction_followup(interaction, "❌ 모집이 존재하지 않습니다.")
                 return
             
-            if recruitment_result["status_code"] != 2:
-                await interaction_response(interaction, "❌ 모집이 마감 또는 취소되었습니다.")
-                return
-                
-            # 파티장은 자신의 모집에 지원할 수 없음
-            if interaction.user.id == int(recruitment_result["create_user_id"]):
-                await interaction_response(interaction, "❌ 파티장은 자신의 모집에 지원할 수 없습니다.")
-                return
-
-            if select_participants_check(db, recru_id, user.id):
-                await interaction_response(interaction, "❌ 이미 지원한 상태입니다.")
-                return
-            
-            participants_list = select_participants(db, recru_id)
-            if recruitment_result["max_person"] <= len(participants_list):
-                await interaction_response(interaction, "❌ 모집인원이 초과되었습니다.")
+            # 여러 검증 동시 수행
+            validation_results = await self.validate_application(db, recruitment_result, participants_list, user.id)
+            if not validation_results["valid"]:
+                await interaction_followup(interaction, validation_results["message"])
                 return
             
             # 지원자 등록
@@ -149,55 +151,91 @@ class RecruitmentListButtonView(discord.ui.View):
             if insert_result:
                 participants_list.append(user.id)
             else:
-                await interaction_response(interaction, "❌ 시스템 문제로 지원에 실패했습니다.")
+                await interaction_followup(interaction, "❌ 시스템 문제로 지원에 실패했습니다.")
                 return
 
             # 재조회(최신화)
             participants_list = select_participants(db, recru_id)
 
             # 모집인원이 꽉차면 모집마감으로 상태값 업데이트
+            create_thread_needed = False
             if recruitment_result["max_person"] <= len(participants_list):
                 # 모집마감 상태값 업데이트(3: 모집마감)
                 update_result = update_recruitment_status(db, 3, recru_id=recru_id)
                 if not update_result:
-                    await interaction_response(interaction, "❌ 모집마감 상태 업데이트에 실패했습니다.")
+                    await interaction_followup(interaction, "❌ 모집마감 상태 업데이트에 실패했습니다.")
                     return
+                create_thread_needed = True
             
             db.commit()
 
             # 재조회(최신화)
             recruitment_result = select_recruitment(db, recru_id)
 
-            embed = build_recruitment_embed(
-                recruitment_result["dungeon_type"],
-                recruitment_result["dungeon_name"],
-                recruitment_result["dungeon_difficulty"],
-                recruitment_result["recru_discript"],
-                recruitment_result["status"],
-                recruitment_result["max_person"],
-                recruitment_result["create_user_id"],
-                participants_list,
-                interaction.message.embeds[0].thumbnail.url,
-                self.recru_id,
-                recruitment_result["create_dt"]
-            )
+            # 임베드 생성 및 메시지 업데이트
+            embed = await self.create_updated_embed(recruitment_result, participants_list, interaction.message.embeds[0].thumbnail.url)
 
             # 버튼제거 검사 및 제거
             self.remove_all_buttons(recruitment_result["status_code"])
 
-            await interaction.response.edit_message(embed=embed, view=self)
-            await interaction_followup(interaction, "지원 완료!")
+            await interaction.edit_original_response(embed=embed, view=self)
+            await interaction.followup.send("지원 완료!", ephemeral=True)
 
-            if recruitment_result["max_person"] <= len(participants_list):
-                await create_thread(interaction)
-
+            # 스레드 생성 필요시 비동기로 실행
+            if create_thread_needed:
+                asyncio.create_task(create_thread(interaction))
             
         except Exception as e:
             logger.error(f"지원하기 버튼 전역오류 : {e}")
+            logger.error(traceback.format_exc())
             await interaction_followup(interaction, "❌ 시스템 문제로 지원에 실패했습니다.")
-
+            db.rollback()
         finally:
             db.close()
+
+    async def fetch_recruitment(self, db, recru_id):
+        """모집 정보 조회"""
+        return select_recruitment(db, recru_id)
+        
+    async def fetch_participants(self, db, recru_id):
+        """참가자 목록 조회"""
+        return select_participants(db, recru_id) or []
+        
+    async def validate_application(self, db, recruitment_result, participants_list, user_id):
+        """지원 유효성 검사"""
+        if recruitment_result["status_code"] != 2:
+            return {"valid": False, "message": "❌ 모집이 마감 또는 취소되었습니다."}
+                
+        # 파티장은 자신의 모집에 지원할 수 없음
+        if user_id == int(recruitment_result["create_user_id"]):
+            return {"valid": False, "message": "❌ 파티장은 자신의 모집에 지원할 수 없습니다."}
+
+        if select_participants_check(db, recruitment_result["recru_id"], user_id):
+            return {"valid": False, "message": "❌ 이미 지원한 상태입니다."}
+        
+        if recruitment_result["max_person"] <= len(participants_list):
+            return {"valid": False, "message": "❌ 모집인원이 초과되었습니다."}
+            
+        return {"valid": True, "message": ""}
+        
+    async def create_updated_embed(self, recruitment_result, participants_list, image_url):
+        """업데이트된 임베드 생성"""
+        return build_recruitment_embed(
+            recruitment_result["dungeon_type"],
+            recruitment_result["dungeon_name"],
+            recruitment_result["dungeon_difficulty"],
+            recruitment_result["recru_discript"],
+            recruitment_result["status"],
+            recruitment_result["max_person"],
+            recruitment_result["create_user_id"],
+            participants_list,
+            image_url,
+            self.recru_id,
+            recruitment_result["create_dt"]
+        )
+
+    # 나머지 버튼 핸들러도 비슷한 방식으로 최적화
+    # ...existing code...
 
     # ───────────────────────────────────────────────
     #             지원취소 버튼 & 기능

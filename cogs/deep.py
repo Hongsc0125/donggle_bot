@@ -5,6 +5,7 @@ from discord import app_commands
 import asyncio
 from datetime import datetime, timedelta
 import traceback  # traceback 모듈 추가
+from core.utils import with_priority, execute_concurrently, batch_operation
 
 from db.session import SessionLocal
 from core.utils import interaction_response, interaction_followup
@@ -384,11 +385,57 @@ class DeepAlertView(discord.ui.View):
 class DeepCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.message_queue = asyncio.Queue()
+        self.message_workers = []
+        self._start_message_workers()
         self.manage_deep_channel.start()  # 심층 채널 관리 작업 시작
+        self.channel_semaphore = asyncio.Semaphore(5)  # 채널 API 호출 제한
+        self.batch_tasks = {}  # 채널별 배치 작업
+
+    def _start_message_workers(self):
+        """메시지 처리 워커 시작"""
+        for i in range(3):  # 3개의 워커 생성
+            task = asyncio.create_task(self._message_worker())
+            self.message_workers.append(task)
+            logger.info(f"심층 메시지 처리 워커 {i} 시작")
+    
+    async def _message_worker(self):
+        """메시지 처리 요청 워커"""
+        while True:
+            try:
+                # 큐에서 작업 가져오기
+                task_data = await self.message_queue.get()
+                
+                try:
+                    # 작업 처리
+                    func = task_data.get("func")
+                    args = task_data.get("args", [])
+                    kwargs = task_data.get("kwargs", {})
+                    
+                    # 함수 호출
+                    await func(*args, **kwargs)
+                    
+                except Exception as e:
+                    logger.error(f"심층 메시지 작업 처리 중 오류: {str(e)}")
+                    logger.error(traceback.format_exc())
+                
+                # 작업 완료 표시
+                self.message_queue.task_done()
+                
+            except asyncio.CancelledError:
+                logger.info("심층 메시지 워커 종료")
+                break
+            except Exception as e:
+                logger.error(f"심층 메시지 워커 오류: {str(e)}")
+                await asyncio.sleep(1)  # 오류 발생 시 잠시 대기
 
     def cog_unload(self):
         """Cog가 언로드될 때 실행됩니다."""
         self.manage_deep_channel.cancel()  # 작업 취소
+        
+        # 워커 태스크 정리
+        for worker in self.message_workers:
+            worker.cancel()
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -519,8 +566,7 @@ class DeepCog(commands.Cog):
         """2분마다 심층 제보 채널의 메시지를 관리합니다."""
         logger.info("심층 제보 채널 관리 시작...")
         
-        success_count = 0
-        failed_count = 0
+        channel_tasks = []
         
         # 각 길드별로 처리
         for guild in self.bot.guilds:
@@ -533,202 +579,266 @@ class DeepCog(commands.Cog):
                         logger.info(f"길드 {guild.id}에 설정된 심층 채널이 없습니다.")
                         continue
                     
-                    # 각 채널별로 처리
+                    # 각 채널 처리 작업을 리스트에 추가
                     for channel_id, auth in channel_auth_pairs:
-                        try:
-                            # 채널 메시지 관리 (삭제하지 않고 상태에 따라 처리)
-                            await self.clean_deep_channel(db, guild.id, channel_id, auth)
-                            success_count += 1
-                        except Exception as e:
-                            failed_count += 1
-                            logger.error(f"심층 채널 {channel_id} 관리 중 오류: {e}")
-                            logger.error(traceback.format_exc())
+                        channel_tasks.append(self.clean_deep_channel(db, guild.id, channel_id, auth))
+            
             except Exception as e:
-                failed_count += 1
-                logger.error(f"길드 {guild.id}의 심층 채널 관리 중 오류: {e}")
+                logger.error(f"길드 {guild.id}의 심층 채널 관리 중 오류: {str(e)}")
                 logger.error(traceback.format_exc())
         
-        logger.info(f"심층 제보 채널 관리 완료 (성공: {success_count}, 실패: {failed_count})")
+        # 모든 채널 관리 작업 동시 실행
+        if channel_tasks:
+            results = await execute_concurrently(channel_tasks)
+            success_count = sum(1 for r in results if r is True)
+            logger.info(f"심층 제보 채널 관리 완료: {success_count}/{len(channel_tasks)} 성공")
+        else:
+            logger.info("관리할 심층 채널이 없습니다.")
 
     @manage_deep_channel.before_loop
     async def before_manage_deep_channel(self):
         """심층 채널 관리를 시작하기 전에 봇이 준비될 때까지 대기"""
         await self.bot.wait_until_ready()
 
+    @batch_operation(size=5, timeout=1.0)
+    async def process_message_batch(self, items):
+        """메시지 처리 배치 작업"""
+        message_tasks = []
+        
+        for args, kwargs in items:
+            if not args:  # 빈 args 처리
+                continue
+                
+            message = args[0] if len(args) > 0 else None
+            operation = args[1] if len(args) > 1 else None
+            deep_id = args[2] if len(args) > 2 else None
+            
+            if not message or not operation:
+                continue
+            
+            if operation == "error":
+                message_tasks.append(self.mark_error_message(message, deep_id))
+            elif operation == "expire":
+                message_tasks.append(self.mark_expired_message(message, deep_id))
+            elif operation == "refresh":
+                message_tasks.append(self.refresh_valid_message(message, deep_id))
+        
+        # 배치 처리 동시 실행
+        if message_tasks:
+            await execute_concurrently(message_tasks)
+            return True
+        return False
+
     async def clean_deep_channel(self, db, guild_id, channel_id, auth=None):
-        """심층 제보 채널의 메시지를 상태에 따라 관리합니다."""
-        channel = self.bot.get_channel(int(channel_id))
-        if not channel:
-            logger.warning(f"심층 채널 {channel_id}를 찾을 수 없습니다.")
-            return
-        
-        logger.info(f"심층 채널 {channel_id} 메시지 관리 시작 (권한: {auth})")
-        
-        # 메시지 분류용 변수
-        select_messages = []  # 선택 메시지 (임베드+셀렉트)
-        deep_report_messages = {}  # 심층 제보 메시지 {deep_id: message}
-        total_messages = 0
-        processed_messages = 0
-        
-        try:
-            # 채널 내 메시지 조회 (최근 100개)
-            async for message in channel.history(limit=100):
-                total_messages += 1
-                if message.author.id != self.bot.user.id:
-                    continue
-                
-                processed_messages += 1
-                
-                # 메시지 분류 - 메시지 유형 정확하게 구분
-                try:
-                    # Select 메시지 식별 (드롭다운 선택 컴포넌트가 있는 메시지)
-                    if message.components and any("심층 위치 선택" in str(comp) for comp in message.components):
-                        select_messages.append(message)
-                        continue
-                    
-                    # 심층 제보 메시지 식별 (footer에 ID가 있는 임베드)
-                    if message.embeds and len(message.embeds) > 0:
-                        embed = message.embeds[0]
-                        if embed.footer and embed.footer.text and "ID:" in embed.footer.text:
-                            try:
-                                # Footer 형식: "제보자: USERNAME | ID: DEEP_ID"
-                                deep_id_str = embed.footer.text.split("ID:")[-1].strip()
-                                # 숫자로 변환하지 않고 문자열 그대로 사용
-                                deep_report_messages[deep_id_str] = message
-                                logger.debug(f"심층 제보 메시지 발견: ID {deep_id_str}, 메시지 ID {message.id}")
-                            except (ValueError, IndexError) as e:
-                                logger.warning(f"ID 파싱 실패: '{embed.footer.text}' - {e}")
-                except Exception as msg_e:
-                    logger.error(f"메시지 분류 중 오류: {msg_e}")
-                    logger.error(traceback.format_exc())
+        """심층 제보 채널의 메시지를 상태에 따라 관리합니다. (동시성 개선)"""
+        async with self.channel_semaphore:
+            channel = self.bot.get_channel(int(channel_id))
+            if not channel:
+                logger.warning(f"심층 채널 {channel_id}를 찾을 수 없습니다.")
+                return False
             
-            logger.info(f"채널 {channel_id}에서 총 {total_messages}개 메시지 중 {processed_messages}개 처리됨 "
-                        f"(선택 메시지: {len(select_messages)}, 제보 메시지: {len(deep_report_messages)})")
+            logger.info(f"심층 채널 {channel_id} 메시지 관리 시작 (권한: {auth})")
             
-            # 제보 메시지들의 ID 목록
-            found_deep_ids = list(deep_report_messages.keys())
-            if found_deep_ids:
-                logger.info(f"발견된 제보 메시지 ID: {', '.join(found_deep_ids[:5])}{'...' if len(found_deep_ids) > 5 else ''}")
+            # 메시지 분류용 변수
+            select_messages = []  # 선택 메시지 (임베드+셀렉트)
+            deep_report_messages = {}  # 심층 제보 메시지 {deep_id: message}
+            total_messages = 0
+            processed_messages = 0
             
-            # 1. 제보 메시지 상태에 따라 분류
-            now = datetime.now()
-            logger.info(f"현재 시간: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-            all_reports = select_all_deep_reports(db, guild_id, channel_id)
-            
-            if not all_reports:
-                logger.info(f"채널 {channel_id}에 저장된 심층 제보가 없습니다.")
-                return
-            
-            # DB에 저장된 모든 deep_id 목록
-            db_deep_ids = [str(report["deep_id"]) for report in all_reports]
-            logger.info(f"DB에 저장된 제보 ID: {', '.join(db_deep_ids[:5])}{'...' if len(db_deep_ids) > 5 else ''}")
-            
-            # 제보 상태별 분류
-            error_deep_ids = set()  # 오제보로 표시된 메시지
-            expired_deep_ids = set()  # 시간이 만료된 메시지
-            valid_deep_ids = set()  # 유효한 메시지
-            
-            for report in all_reports:
-                deep_id = str(report["deep_id"])  # 문자열로 변환하여 비교
-                create_time = report["create_dt"]
-                remaining_minutes = report["remaining_minutes"]
-                is_error = report["is_error"] == 'Y'
-                
-                # 오제보 여부 확인
-                if is_error:
-                    error_deep_ids.add(deep_id)
-                    continue
-                
-                # 만료 여부 확인 (생성 시간 + 남은 시간 < 현재 시간)
-                expiration_time = create_time + timedelta(minutes=remaining_minutes)
-                
-                # 디버깅을 위한 로그 추가
-                logger.debug(f"심층 제보 ID {deep_id}: 생성시간 {create_time.strftime('%Y-%m-%d %H:%M:%S')}, " +
-                            f"남은시간 {remaining_minutes}분, 만료시간 {expiration_time.strftime('%Y-%m-%d %H:%M:%S')}")
-                
-                if expiration_time < now:
-                    expired_deep_ids.add(deep_id)
-                    logger.info(f"만료된 심층 제보 감지: ID {deep_id} (만료시각: {expiration_time.strftime('%Y-%m-%d %H:%M:%S')})")
-                    continue
-                
-                # 유효한 메시지
-                valid_deep_ids.add(deep_id)
-            
-            logger.info(f"채널 {channel_id} 메시지 상태 분류: 오제보 {len(error_deep_ids)}개, " + 
-                        f"만료됨 {len(expired_deep_ids)}개, 유효함 {len(valid_deep_ids)}개")
-            
-            # 2. 각 메시지 상태에 따라 처리 - 유효한 메시지만 업데이트
-            updated_count = 0
-            for deep_id, message in deep_report_messages.items():
-                try:
-                    # 이미 오제보나 만료 상태인 메시지는 업데이트 하지 않음
-                    if deep_id in error_deep_ids or deep_id in expired_deep_ids:
-                        logger.debug(f"이미 오제보 또는 만료된 메시지 {deep_id} 업데이트 스킵")
-                        continue
-                        
-                    # 유효한 메시지만 업데이트
-                    if deep_id in valid_deep_ids:
-                        # 유효한 메시지 처리 - 상호작용 갱신
-                        result = await self.refresh_valid_message(message, deep_id)
-                        if result:
-                            updated_count += 1
-                            logger.info(f"유효 메시지 {deep_id} 상호작용 갱신 완료")
-                    else:
-                        # 알 수 없는 상태의 메시지 (DB에 없는 경우)
-                        logger.warning(f"알 수 없는 상태의 메시지: {deep_id} (DB에 정보 없음)")
-                except Exception as e:
-                    logger.error(f"메시지 {deep_id} 처리 중 오류: {e}")
-                    logger.error(traceback.format_exc())
-            
-            logger.info(f"채널 {channel_id}에서 총 {updated_count}개 메시지 상태 업데이트 완료")
-            
-            # 3. Select 메시지 처리 - 반드시 채널의 가장 마지막에 위치하도록 관리
             try:
-                # 현재 채널의 가장 최근 메시지 확인
-                last_message = None
-                async for msg in channel.history(limit=1):
-                    last_message = msg
-                    break
-                
-                # 양식 메시지가 채널의 마지막 메시지가 아니거나 없는 경우
-                needs_new_select = False
-                
-                if not select_messages:
-                    # 양식 메시지가 없는 경우 신규 생성 필요
-                    needs_new_select = True
-                    logger.info(f"양식 메시지가 없어 새로 생성합니다.")
-                elif last_message and select_messages[0].id != last_message.id:
-                    # 양식 메시지가 마지막 메시지가 아닌 경우 기존 메시지 삭제 후 신규 생성
-                    needs_new_select = True
-                    logger.info(f"양식 메시지가 마지막 메시지가 아니어서 재생성합니다.")
-                
-                # 신규 양식 메시지 생성이 필요한 경우
-                if needs_new_select:
-                    # 기존 양식 메시지 모두 삭제
-                    for old_select in select_messages:
-                        try:
-                            await old_select.delete()
-                            logger.info(f"기존 양식 메시지 삭제: {old_select.id}")
-                        except Exception as del_err:
-                            logger.error(f"양식 메시지 삭제 중 오류: {del_err}")
+                # 채널 내 메시지 조회 (최근 100개)
+                async for message in channel.history(limit=100):
+                    total_messages += 1
+                    if message.author.id != self.bot.user.id:
+                        continue
                     
-                    # 새 양식 메시지 생성
-                    await self.initialize_deep_button(channel_id, auth)
-                else:
-                    # 중복된 양식 메시지만 삭제 (첫 번째 메시지 유지)
-                    if len(select_messages) > 1:
-                        for old_message in select_messages[1:]:
+                    processed_messages += 1
+                    
+                    # 메시지 분류 - 메시지 유형 정확하게 구분
+                    try:
+                        # Select 메시지 식별 (드롭다운 선택 컴포넌트가 있는 메시지)
+                        if message.components and any("심층 위치 선택" in str(comp) for comp in message.components):
+                            select_messages.append(message)
+                            continue
+                        
+                        # 심층 제보 메시지 식별 (footer에 ID가 있는 임베드)
+                        if message.embeds and len(message.embeds) > 0:
+                            embed = message.embeds[0]
+                            if embed.footer and embed.footer.text and "ID:" in embed.footer.text:
+                                try:
+                                    # Footer 형식: "제보자: USERNAME | ID: DEEP_ID"
+                                    deep_id_str = embed.footer.text.split("ID:")[-1].strip()
+                                    # 숫자로 변환하지 않고 문자열 그대로 사용
+                                    deep_report_messages[deep_id_str] = message
+                                    logger.debug(f"심층 제보 메시지 발견: ID {deep_id_str}, 메시지 ID {message.id}")
+                                except (ValueError, IndexError) as e:
+                                    logger.warning(f"ID 파싱 실패: '{embed.footer.text}' - {e}")
+                    except Exception as msg_e:
+                        logger.error(f"메시지 분류 중 오류: {msg_e}")
+                        logger.error(traceback.format_exc())
+                
+                logger.info(f"채널 {channel_id}에서 총 {total_messages}개 메시지 중 {processed_messages}개 처리됨 "
+                            f"(선택 메시지: {len(select_messages)}, 제보 메시지: {len(deep_report_messages)})")
+                
+                # 제보 메시지들의 ID 목록
+                found_deep_ids = list(deep_report_messages.keys())
+                if found_deep_ids:
+                    logger.info(f"발견된 제보 메시지 ID: {', '.join(found_deep_ids[:5])}{'...' if len(found_deep_ids) > 5 else ''}")
+                
+                # 1. 제보 메시지 상태에 따라 분류
+                now = datetime.now()
+                logger.info(f"현재 시간: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+                all_reports = select_all_deep_reports(db, guild_id, channel_id)
+                
+                if not all_reports:
+                    logger.info(f"채널 {channel_id}에 저장된 심층 제보가 없습니다.")
+                    return
+                
+                # DB에 저장된 모든 deep_id 목록
+                db_deep_ids = [str(report["deep_id"]) for report in all_reports]
+                logger.info(f"DB에 저장된 제보 ID: {', '.join(db_deep_ids[:5])}{'...' if len(db_deep_ids) > 5 else ''}")
+                
+                # 제보 상태별 분류
+                error_deep_ids = set()  # 오제보로 표시된 메시지
+                expired_deep_ids = set()  # 시간이 만료된 메시지
+                valid_deep_ids = set()  # 유효한 메시지
+                
+                for report in all_reports:
+                    deep_id = str(report["deep_id"])  # 문자열로 변환하여 비교
+                    create_time = report["create_dt"]
+                    remaining_minutes = report["remaining_minutes"]
+                    is_error = report["is_error"] == 'Y'
+                    
+                    # 오제보 여부 확인
+                    if is_error:
+                        error_deep_ids.add(deep_id)
+                        continue
+                    
+                    # 만료 여부 확인 (생성 시간 + 남은 시간 < 현재 시간)
+                    expiration_time = create_time + timedelta(minutes=remaining_minutes)
+                    
+                    # 디버깅을 위한 로그 추가
+                    logger.debug(f"심층 제보 ID {deep_id}: 생성시간 {create_time.strftime('%Y-%m-%d %H:%M:%S')}, " +
+                                f"남은시간 {remaining_minutes}분, 만료시간 {expiration_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                    
+                    if expiration_time < now:
+                        expired_deep_ids.add(deep_id)
+                        logger.info(f"만료된 심층 제보 감지: ID {deep_id} (만료시각: {expiration_time.strftime('%Y-%m-%d %H:%M:%S')})")
+                        continue
+                    
+                    # 유효한 메시지
+                    valid_deep_ids.add(deep_id)
+                
+                logger.info(f"채널 {channel_id} 메시지 상태 분류: 오제보 {len(error_deep_ids)}개, " + 
+                            f"만료됨 {len(expired_deep_ids)}개, 유효함 {len(valid_deep_ids)}개")
+                
+                # 2. 각 메시지 상태에 따라 처리 - 유효한 메시지만 업데이트
+                updated_count = 0
+                for deep_id, message in deep_report_messages.items():
+                    try:
+                        # 이미 오제보나 만료 상태인 메시지는 업데이트 하지 않음
+                        if deep_id in error_deep_ids or deep_id in expired_deep_ids:
+                            logger.debug(f"이미 오제보 또는 만료된 메시지 {deep_id} 업데이트 스킵")
+                            continue
+                            
+                        # 유효한 메시지만 업데이트
+                        if deep_id in valid_deep_ids:
+                            # 유효한 메시지 처리 - 상호작용 갱신
+                            result = await self.refresh_valid_message(message, deep_id)
+                            if result:
+                                updated_count += 1
+                                logger.info(f"유효 메시지 {deep_id} 상호작용 갱신 완료")
+                        else:
+                            # 알 수 없는 상태의 메시지 (DB에 없는 경우)
+                            logger.warning(f"알 수 없는 상태의 메시지: {deep_id} (DB에 정보 없음)")
+                    except Exception as e:
+                        logger.error(f"메시지 {deep_id} 처리 중 오류: {e}")
+                        logger.error(traceback.format_exc())
+                
+                logger.info(f"채널 {channel_id}에서 총 {updated_count}개 메시지 상태 업데이트 완료")
+                
+                # 3. Select 메시지 처리 - 반드시 채널의 가장 마지막에 위치하도록 관리
+                try:
+                    # 현재 채널의 가장 최근 메시지 확인
+                    last_message = None
+                    async for msg in channel.history(limit=1):
+                        last_message = msg
+                        break
+                    
+                    # 양식 메시지가 채널의 마지막 메시지가 아니거나 없는 경우
+                    needs_new_select = False
+                    
+                    if not select_messages:
+                        # 양식 메시지가 없는 경우 신규 생성 필요
+                        needs_new_select = True
+                        logger.info(f"양식 메시지가 없어 새로 생성합니다.")
+                    elif last_message and select_messages[0].id != last_message.id:
+                        # 양식 메시지가 마지막 메시지가 아닌 경우 기존 메시지 삭제 후 신규 생성
+                        needs_new_select = True
+                        logger.info(f"양식 메시지가 마지막 메시지가 아니어서 재생성합니다.")
+                    
+                    # 신규 양식 메시지 생성이 필요한 경우
+                    if needs_new_select:
+                        # 기존 양식 메시지 모두 삭제
+                        for old_select in select_messages:
                             try:
-                                await old_message.delete()
-                            except Exception as e:
-                                logger.error(f"Select 메시지 삭제 중 오류: {e}")
+                                await old_select.delete()
+                                logger.info(f"기존 양식 메시지 삭제: {old_select.id}")
+                            except Exception as del_err:
+                                logger.error(f"양식 메시지 삭제 중 오류: {del_err}")
+                        
+                        # 새 양식 메시지 생성
+                        await self.initialize_deep_button(channel_id, auth)
+                    else:
+                        # 중복된 양식 메시지만 삭제 (첫 번째 메시지 유지)
+                        if len(select_messages) > 1:
+                            for old_message in select_messages[1:]:
+                                try:
+                                    await old_message.delete()
+                                except Exception as e:
+                                    logger.error(f"Select 메시지 삭제 중 오류: {e}")
+                
+                except Exception as e:
+                    logger.error(f"Select 메시지 처리 중 오류: {e}")
             
             except Exception as e:
-                logger.error(f"Select 메시지 처리 중 오류: {e}")
-        
-        except Exception as e:
-            logger.error(f"심층 채널 {channel_id} 메시지 관리 중 오류: {e}")
-            logger.error(traceback.format_exc())
+                logger.error(f"심층 채널 {channel_id} 메시지 관리 중 오류: {e}")
+                logger.error(traceback.format_exc())
+            
+            # 배치 처리를 위한 작업 목록
+            error_messages = []
+            expired_messages = []
+            valid_messages = []
+            
+            # 메시지 분류 후 각 목록에 추가
+            for deep_id, message in deep_report_messages.items():
+                if deep_id in error_deep_ids:
+                    error_messages.append((message, "error", deep_id))
+                elif deep_id in expired_deep_ids:
+                    expired_messages.append((message, "expire", deep_id))
+                elif deep_id in valid_deep_ids:
+                    valid_messages.append((message, "refresh", deep_id))
+            
+            # 배치 작업 실행
+            batch_tasks = []
+            
+            # 에러 메시지 배치 처리
+            if error_messages:
+                batch_tasks.append(self.process_message_batch(error_messages))
+                
+            # 만료 메시지 배치 처리
+            if expired_messages:
+                batch_tasks.append(self.process_message_batch(expired_messages))
+                
+            # 유효 메시지 배치 처리
+            if valid_messages:
+                batch_tasks.append(self.process_message_batch(valid_messages))
+            
+            # 배치 작업 동시 실행
+            if batch_tasks:
+                await execute_concurrently(batch_tasks)
+            
+            return True
 
     def _clean_status_indicators(self, title):
         """상태 표시자를 제목에서 제거하는 헬퍼 함수"""

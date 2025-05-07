@@ -8,6 +8,7 @@ import re
 import traceback
 from core.config import settings
 from sqlalchemy import text
+from core.utils import with_priority, execute_concurrently, batch_operation
 
 
 from db.session import SessionLocal
@@ -560,10 +561,54 @@ class AlertCog(commands.Cog):
         self.bot = bot
         self.check_alerts.start()
         self.last_sent_alerts = {}  # 중복 방지를 위해 마지막 전송 알림 추적
+        self.dm_queue = asyncio.Queue()  # DM 전송용 큐
+        self.dm_workers = []
+        self._start_dm_workers()
         logger.info("AlertCog 초기화 완료")
+    
+    def _start_dm_workers(self):
+        """DM 전송 워커 시작"""
+        for i in range(5):  # 5개의 워커 생성
+            task = asyncio.create_task(self._dm_worker())
+            self.dm_workers.append(task)
+            logger.info(f"DM 전송 워커 {i} 시작")
+    
+    async def _dm_worker(self):
+        """DM 전송 요청 처리 워커"""
+        while True:
+            try:
+                # 큐에서 작업 가져오기
+                dm_data = await self.dm_queue.get()
+                
+                try:
+                    # DM 전송
+                    user_id = dm_data.get("user_id")
+                    embed = dm_data.get("embed")
+                    
+                    user = await self.bot.fetch_user(int(user_id))
+                    if user and not user.bot:
+                        await user.send(embed=embed)
+                        logger.info(f"알림 전송 완료: {user.name} ({user_id})")
+                except discord.Forbidden:
+                    logger.warning(f"사용자 {user_id}에게 DM을 보낼 수 없습니다.")
+                except Exception as e:
+                    logger.error(f"DM 전송 중 오류: {str(e)}")
+                
+                # 작업 완료 표시
+                self.dm_queue.task_done()
+                
+            except asyncio.CancelledError:
+                logger.info("DM 전송 워커 종료")
+                break
+            except Exception as e:
+                logger.error(f"DM 전송 워커 오류: {str(e)}")
+                await asyncio.sleep(1)  # 오류 발생 시 잠시 대기
     
     def cog_unload(self):
         self.check_alerts.cancel()
+        # 워커 태스크 정리
+        for worker in self.dm_workers:
+            worker.cancel()
     
     @commands.Cog.listener()
     async def on_ready(self):
@@ -821,28 +866,62 @@ class AlertCog(commands.Cog):
             day_of_week = DAY_OF_WEEK[now.weekday()]
             
             with SessionLocal() as db:
+                # 정각 알림과 경고 알림을 동시에 처리
+                alert_tasks = []
+                
                 # 정각 알림 확인
                 exact_time_key = f"{current_time}-exact"
                 if exact_time_key not in self.last_sent_alerts or self.last_sent_alerts[exact_time_key] < now.date():
-                    await self.send_alerts(db, current_time, day_of_week, is_warning=False)
+                    alert_tasks.append(self.send_alerts(db, current_time, day_of_week, is_warning=False))
                     self.last_sent_alerts[exact_time_key] = now.date()
                 
                 # 5분 전 경고 알림 확인
                 warning_key = f"{warning_time}-warning"
                 if warning_key not in self.last_sent_alerts or self.last_sent_alerts[warning_key] < now.date():
-                    await self.send_alerts(db, warning_time, day_of_week, is_warning=True)
+                    alert_tasks.append(self.send_alerts(db, warning_time, day_of_week, is_warning=True))
                     self.last_sent_alerts[warning_key] = now.date()
+                
+                # 동시에 모든 알림 처리 실행
+                if alert_tasks:
+                    await execute_concurrently(alert_tasks)
         
         except Exception as e:
             logger.error(f"알림 체크 중 오류: {str(e)}")
+            logger.error(traceback.format_exc())
     
     @check_alerts.before_loop
     async def before_check_alerts(self):
         """알림 루프를 시작하기 전에 봇이 준비될 때까지 대기"""
         await self.bot.wait_until_ready()
     
+    @batch_operation(size=10, timeout=2.0)
+    async def queue_dm_batch(self, items):
+        """DM 전송 요청을 배치로 처리"""
+        dm_tasks = []
+        
+        for args, kwargs in items:
+            user_id = args[0]
+            embed = args[1]
+            dm_tasks.append(self._send_dm(user_id, embed))
+        
+        # 배치 DM 전송 동시 실행
+        if dm_tasks:
+            await execute_concurrently(dm_tasks)
+    
+    async def _send_dm(self, user_id, embed):
+        """개별 DM 전송 로직"""
+        try:
+            user = await self.bot.fetch_user(int(user_id))
+            if user and not user.bot:
+                await user.send(embed=embed)
+                logger.info(f"배치 알림 전송 완료: {user.name} ({user_id})")
+        except discord.Forbidden:
+            logger.warning(f"사용자 {user_id}에게 DM을 보낼 수 없습니다.")
+        except Exception as e:
+            logger.error(f"DM 전송 중 오류: {str(e)}")
+    
     async def send_alerts(self, db, alert_time, day_of_week, is_warning=False):
-        """사용자에게 알림 전송"""
+        """사용자에게 알림 전송 (배치 처리 적용)"""
         try:
             # 현재 시간에 대한 알림 가져오기
             alerts = get_upcoming_alerts(db, alert_time, day_of_week)
@@ -870,58 +949,48 @@ class AlertCog(commands.Cog):
                 user_alerts = filtered_alerts
                 logger.info(f"개발 환경: 봇 운영자만 알림 받음 ({len(user_alerts)} 명)")
             
-            # 사용자에게 DM 전송
+            # 알림 전송 작업 배치 처리
+            batch_tasks = []
+            
+            # 사용자별로 DM 임베드 생성 및 큐에 추가
             for user_id, user_alert_list in user_alerts.items():
-                try:
-                    user = await self.bot.fetch_user(int(user_id))
-                    if not user or user.bot:
-                        continue
-                    
-                    # 알림용 임베드 생성
-                    embed = discord.Embed(
-                        title="⏰ 알림" if not is_warning else "⚠️ 5분 전 알림",
-                        description=f"{'알림 시간입니다!' if not is_warning else '5분 후 설정한 알림이 있습니다!'}",
-                        color=discord.Color.red() if not is_warning else discord.Color.gold(),
-                        timestamp=datetime.now()
-                    )
-                    
-                    # 유형별로 알림 그룹화
-                    alert_types = {}
-                    for alert in user_alert_list:
-                        alert_type = alert['alert_type']
-                        if not alert_types.get(alert_type):
-                            alert_types[alert_type] = []
-                        alert_types[alert_type].append(alert)
-                    
-                    # 각 알림 유형에 대한 필드 추가
-                    for alert_type, alerts_of_type in alert_types.items():
-                        # 이미 처리된 알림 건너뛰기
-                        if is_warning and self.was_alert_sent(alerts_of_type[0], user_id):
-                            continue
-                            
-                        type_name = ALERT_TYPE_NAMES.get(alert_type, alert_type)
-                        emoji = ALERT_TYPE_EMOJI.get(alert_type, '🔔')
-                        times = [alert['alert_time'].strftime('%H:%M') for alert in alerts_of_type]
-                        embed.add_field(
-                            name=f"{emoji} {type_name} 알림",
-                            value=f"시간: {', '.join(times)}",
-                            inline=False
-                        )
-                    
-                    if len(embed.fields) > 0:
-                        try:
-                            await user.send(embed=embed)
-                            logger.info(f"알림 전송 완료: {user.name} ({user_id})")
-                        except discord.Forbidden:
-                            logger.warning(f"사용자 {user.name} ({user_id})에게 DM을 보낼 수 없습니다.")
-                        except Exception as e:
-                            logger.error(f"알림 전송 중 오류: {str(e)}")
+                # 알림용 임베드 생성
+                embed = discord.Embed(
+                    title="⏰ 알림" if not is_warning else "⚠️ 5분 전 알림",
+                    description=f"{'알림 시간입니다!' if not is_warning else '5분 후 설정한 알림이 있습니다!'}",
+                    color=discord.Color.red() if not is_warning else discord.Color.gold(),
+                    timestamp=datetime.now()
+                )
                 
-                except Exception as e:
-                    logger.error(f"사용자 {user_id}에게 알림 전송 중 오류: {str(e)}")
-        
+                # 유형별로 알림 그룹화 및 필드 추가 (기존 코드 유지)
+                alert_types = {}
+                for alert in user_alert_list:
+                    alert_type = alert['alert_type']
+                    if not alert_types.get(alert_type):
+                        alert_types[alert_type] = []
+                    alert_types[alert_type].append(alert)
+                
+                for alert_type, alerts_of_type in alert_types.items():
+                    # 이미 처리된 알림 건너뛰기
+                    if is_warning and self.was_alert_sent(alerts_of_type[0], user_id):
+                        continue
+                        
+                    type_name = ALERT_TYPE_NAMES.get(alert_type, alert_type)
+                    emoji = ALERT_TYPE_EMOJI.get(alert_type, '🔔')
+                    times = [alert['alert_time'].strftime('%H:%M') for alert in alerts_of_type]
+                    embed.add_field(
+                        name=f"{emoji} {type_name} 알림",
+                        value=f"시간: {', '.join(times)}",
+                        inline=False
+                    )
+                
+                # 유효한 알림이 있으면 배치 전송 큐에 추가
+                if len(embed.fields) > 0:
+                    await self.queue_dm_batch(user_id, embed)
+            
         except Exception as e:
             logger.error(f"알림 전송 중 오류: {str(e)}")
+            logger.error(traceback.format_exc())
     
     def was_alert_sent(self, alert, user_id):
         """특정 알림이 오늘 이미 전송되었는지 확인"""
