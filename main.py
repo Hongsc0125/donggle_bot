@@ -37,6 +37,7 @@ class Donggle(commands.Bot):
         logger.info(f"PUBLIC_KEY: {settings.PUBLIC_KEY}")
         logger.info(f"OPENAI_API_KEY: {settings.OPENAI_API_KEY}")
         logger.info(f"DEEPSEEK_API_KEY: {settings.DEEPSEEK_API_KEY}")
+        logger.info(f"RANK_API_URL: {settings.RANK_API_URL}")
         logger.info(f"ENV: {settings.ENV}")
         logger.info("--------------------------------------------------------------------------------------------------------")
 
