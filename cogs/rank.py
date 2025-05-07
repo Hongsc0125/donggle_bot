@@ -4,7 +4,9 @@ from discord.ext import commands
 import aiohttp
 import logging
 import traceback
+from db.session import sessionmaker, rank_engine
 from core.config import settings
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +28,78 @@ class RankModal(discord.ui.Modal, title='캐릭터 랭킹 조회'):
     
     async def on_submit(self, interaction: discord.Interaction):
         # 응답 지연 설정
-        await interaction.response.defer(ephemeral=False)
+        await interaction.response.defer(ephemeral=False, thinking=True)
         
         # 입력값 가져오기
         server = self.server.value
         character = self.character.value
+
+        db_result = None
+        try:
+            RankSession = sessionmaker(autocommit=False, autoflush=False, bind=rank_engine)
+            with RankSession() as db:
+                # 데이터베이스에서 캐릭터 랭킹 정보 조회 15분 이내 갱신된 데이터만
+                query = text("""
+                    SELECT * FROM mabinogi_ranking 
+                    WHERE server_name = :server 
+                    AND character_name = :character
+                    AND retrieved_at >= NOW() - INTERVAL '15 minutes'
+                    ORDER BY retrieved_at DESC
+                    LIMIT 1
+                """)
+                result = db.execute(query, {"server": server, "character": character})
+                rank_data = result.fetchone()
+                
+                if rank_data:
+                    # 데이터베이스에서 정보 찾음
+                    logger.info(f"Found rank data in DB for {character} ({server})")
+                    # SQLAlchemy Row 객체를 안전하게 딕셔너리로 변환
+                    db_result = {column: value for column, value in rank_data._mapping.items()}
+        except Exception as e:
+            logger.error(f"Database query error: {str(e)}\n{traceback.format_exc()}")
+        
+        if db_result:
+            character_info = db_result.get("character", {})
+            character_name = db_result.get("character_name", "알 수 없음")
+            server_name = db_result.get("server_name", "알 수 없음")
+            class_name = db_result.get("class_name", "알 수 없음")
+            rank_position = db_result.get("rank_position", "알 수 없음")
+            power_value = db_result.get("power_value", "알 수 없음")
+            change_amount = db_result.get("change_amount", 0)
+            change_type = db_result.get("change_type", "none")
+
+            # 순위 변동에 따른 색상 및 아이콘 결정
+            if change_type == "up":
+                embed_color = 0x57F287  # 초록색
+                change_emoji = "↑"
+                change_text = f"{change_emoji} {change_amount}"
+            elif change_type == "down":
+                embed_color = 0xED4245  # 빨간색
+                change_emoji = "↓"
+                change_text = f"{change_emoji} {change_amount}"
+            else:
+                embed_color = 0x95A5A6  # 회색
+                change_emoji = "-"
+                change_text = change_emoji
+
+            # 임베드 생성
+            embed = discord.Embed(
+                title=f"🏆 {character_name}",
+                color=embed_color,
+                description=f"**클래스**: {class_name} \n **서버**: {server_name}",
+            )
+
+            # 필드 추가
+            embed.add_field(name="🥇 랭킹", value=f"```{rank_position}```", inline=True)
+            embed.add_field(name="⚔️ 전투력", value=f"```{power_value}```", inline=True)
+            embed.add_field(name="📊 순위 변동", value=f"```{change_text}```", inline=True)
+
+            embed.set_footer(text="정보는 실시간으로 업데이트 되지 않습니다.")
+
+            # 메시지 전송
+            await interaction.followup.send(embed=embed)
+            return
+        
         
         # API 요청 데이터 준비
         data = {
@@ -41,7 +110,8 @@ class RankModal(discord.ui.Modal, title='캐릭터 랭킹 조회'):
         try:
             # API 요청 보내기
             async with aiohttp.ClientSession() as session:
-                async with session.post(settings.RANK_API_URL, json=data, timeout=10) as response:
+                # 타임아웃 값을 30초로 늘려서 API 응답 대기 시간 연장
+                async with session.post(settings.RANK_API_URL, json=data, timeout=30) as response:
                     if response.status != 200:
                         await interaction.followup.send(f"API 요청 실패: {response.status}")
                         return
@@ -91,10 +161,8 @@ class RankModal(discord.ui.Modal, title='캐릭터 랭킹 조회'):
                     embed.add_field(name="🥇 랭킹", value=f"```{rank_position}```", inline=True)
                     embed.add_field(name="⚔️ 전투력", value=f"```{power_value}```", inline=True)
                     embed.add_field(name="📊 순위 변동", value=f"```{change_text}```", inline=True)
-                    
-                    # 캐시 정보
-                    # if result.get("from_cache", False):
-                    #     embed.set_footer(text=f"캐시된 정보: {result.get('message', '')}")
+
+                    embed.set_footer(text="정보는 실시간으로 업데이트 되지 않습니다.")
                     
                     # 메시지 전송
                     await interaction.followup.send(embed=embed)
@@ -118,9 +186,29 @@ class Rank(commands.Cog):
         
     @app_commands.command(name="랭크", description="캐릭터의 랭킹 정보를 조회합니다")
     async def rank(self, interaction: discord.Interaction):
-        # 모달 표시
-        modal = RankModal()
-        await interaction.response.send_modal(modal)
+        try:
+            # 모달 표시
+            modal = RankModal()
+            await interaction.response.send_modal(modal)
+        except discord.errors.NotFound as e:
+            # 상호작용이 이미 만료된 경우 처리
+            if e.code == 10062:  # Unknown interaction
+                logger.warning(f"상호작용이 만료되었습니다: {interaction.id}")
+                # 여기서는 무시하거나 사용자에게 다시 시도하라는 메시지를 보낼 수 없음
+                # 이미 상호작용이 만료되었기 때문
+                pass
+            else:
+                # 다른 NotFound 오류는 로그에 기록
+                logger.error(f"상호작용 오류: {str(e)}")
+        except Exception as e:
+            # 기타 예외 처리
+            logger.error(f"랭크 명령어 처리 중 오류 발생: {str(e)}\n{traceback.format_exc()}")
+            try:
+                # 가능하다면 사용자에게 오류 메시지 전송
+                await interaction.response.send_message("명령어 처리 중 오류가 발생했습니다. 나중에 다시 시도해주세요.", ephemeral=True)
+            except:
+                # 이미 응답했거나 상호작용이 만료된 경우 무시
+                pass
 
 async def setup(bot):
     await bot.add_cog(Rank(bot))

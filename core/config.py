@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     DATABASE_NAME: str
     DB_PW: str
     DB_USER: str
+    DB_HOST: str = ""
 
     # 디코
     DISCORD_TOKEN: str
@@ -35,9 +36,16 @@ class Settings(BaseSettings):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.DB_HOST = self.DATABASE_URL
         encoded_user = quote_plus(self.DB_USER)
         encoded_pw = quote_plus(self.DB_PW)
-        self.DATABASE_URL = f"postgresql://{encoded_user}:{encoded_pw}@{self.DATABASE_URL}/{self.DATABASE_NAME}"
+        self.DATABASE_URL = f"postgresql://{encoded_user}:{encoded_pw}@{self.DB_HOST}/{self.DATABASE_NAME}"
+
+    @property
+    def RANK_DATA_URL(self) -> str:
+        encoded_user = quote_plus(self.DB_USER)
+        encoded_pw = quote_plus(self.DB_PW)
+        return f"postgresql://{encoded_user}:{encoded_pw}@{self.DB_HOST}/rank_data"
 
     @property
     def CURRENT_DATETIME(self) -> str:
