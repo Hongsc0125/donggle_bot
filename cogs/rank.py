@@ -94,7 +94,7 @@ class RankModal(discord.ui.Modal, title='캐릭터 랭킹 조회'):
             embed.add_field(name="⚔️ 전투력", value=f"```{power_value}```", inline=True)
             embed.add_field(name="📊 순위 변동", value=f"```{change_text}```", inline=True)
 
-            embed.set_footer(text="정보는 실시간으로 업데이트 되지 않습니다.")
+            embed.set_footer(text="정보는 실시간으로 업데이트 되지 않을 수 있습니다. 거의 실시간 조회 중입니다.")
 
             # 메시지 전송
             await interaction.followup.send(embed=embed)
