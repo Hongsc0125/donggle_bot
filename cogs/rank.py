@@ -69,7 +69,11 @@ class RankModal(discord.ui.Modal, title='캐릭터 랭킹 조회'):
             change_type = db_result.get("change_type", "none")
 
             # 순위 변동에 따른 색상 및 아이콘 결정
-            if change_type == "up":
+            if change_text == "0":
+                embed_color = 0x95A5A6  # 회색
+                change_emoji = "-"
+                change_text = change_emoji
+            elif change_type == "up":
                 embed_color = 0x57F287  # 초록색
                 change_emoji = "↑"
                 change_text = f"{change_emoji} {change_amount}"
@@ -77,10 +81,6 @@ class RankModal(discord.ui.Modal, title='캐릭터 랭킹 조회'):
                 embed_color = 0xED4245  # 빨간색
                 change_emoji = "↓"
                 change_text = f"{change_emoji} {change_amount}"
-            else:
-                embed_color = 0x95A5A6  # 회색
-                change_emoji = "-"
-                change_text = change_emoji
 
             # 임베드 생성
             embed = discord.Embed(
@@ -137,7 +137,11 @@ class RankModal(discord.ui.Modal, title='캐릭터 랭킹 조회'):
                     change_type = character_info.get("change_type", "none")
                     
                     # 순위 변동에 따른 색상 및 아이콘 결정
-                    if change_type == "up":
+                    if change_text == "0":
+                        embed_color = 0x95A5A6  # 회색
+                        change_emoji = "-"
+                        change_text = change_emoji
+                    elif change_type == "up":
                         embed_color = 0x57F287  # 초록색
                         change_emoji = "↑"
                         change_text = f"{change_emoji} {change_amount}"
@@ -145,10 +149,7 @@ class RankModal(discord.ui.Modal, title='캐릭터 랭킹 조회'):
                         embed_color = 0xED4245  # 빨간색
                         change_emoji = "↓"
                         change_text = f"{change_emoji} {change_amount}"
-                    else:
-                        embed_color = 0x95A5A6  # 회색
-                        change_emoji = "-"
-                        change_text = change_emoji
+
                     
                     # 임베드 생성
                     embed = discord.Embed(
