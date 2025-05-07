@@ -69,7 +69,8 @@ class RankModal(discord.ui.Modal, title='캐릭터 랭킹 조회'):
             change_type = db_result.get("change_type", "none")
 
             # 순위 변동에 따른 색상 및 아이콘 결정
-            if change_text == "0":
+            if change_amount == 0:
+                # 변동 없음 - 항상 회색으로 처리
                 embed_color = 0x95A5A6  # 회색
                 change_emoji = "-"
                 change_text = change_emoji
@@ -81,6 +82,10 @@ class RankModal(discord.ui.Modal, title='캐릭터 랭킹 조회'):
                 embed_color = 0xED4245  # 빨간색
                 change_emoji = "↓"
                 change_text = f"{change_emoji} {change_amount}"
+            else:
+                # 알 수 없는 타입 - 기본 회색
+                embed_color = 0x95A5A6
+                change_text = "-"
 
             # 임베드 생성
             embed = discord.Embed(
@@ -137,7 +142,8 @@ class RankModal(discord.ui.Modal, title='캐릭터 랭킹 조회'):
                     change_type = character_info.get("change_type", "none")
                     
                     # 순위 변동에 따른 색상 및 아이콘 결정
-                    if change_text == "0":
+                    if change_amount == 0:
+                        # 변동 없음 - 항상 회색으로 처리
                         embed_color = 0x95A5A6  # 회색
                         change_emoji = "-"
                         change_text = change_emoji
@@ -149,6 +155,10 @@ class RankModal(discord.ui.Modal, title='캐릭터 랭킹 조회'):
                         embed_color = 0xED4245  # 빨간색
                         change_emoji = "↓"
                         change_text = f"{change_emoji} {change_amount}"
+                    else:
+                        # 알 수 없는 타입 - 기본 회색
+                        embed_color = 0x95A5A6
+                        change_text = "-"
 
                     
                     # 임베드 생성
