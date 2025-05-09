@@ -169,6 +169,15 @@ class TimeInputModal(discord.ui.Modal, title="심층 제보"):
         )
         self.add_item(self.time_input)
 
+        self.comment_input = discord.ui.TextInput(
+            label="상세내용 (선택사항)",
+            placeholder="추가 정보를 입력하세요 (예: 2개요, 3개요 등등)",
+            required=False,
+            max_length=100,
+            style=discord.TextStyle.paragraph
+        )
+        self.add_item(self.comment_input)
+
     async def on_submit(self, interaction: discord.Interaction):
         # 즉시 응답 지연 처리 - 3초 제한을 피하기 위해 가장 먼저 호출
         await interaction.response.defer(ephemeral=True)
@@ -179,6 +188,8 @@ class TimeInputModal(discord.ui.Modal, title="심층 제보"):
             if (remaining_minutes <= 0 or remaining_minutes > 999):
                 await interaction.followup.send("남은 시간은 1~999 사이의 숫자로 입력해주세요.", ephemeral=True)
                 return
+            
+            comment = self.comment_input.value if self.comment_input.value.strip() else None
                 
             # 제보 정보 생성
             location = self.location
@@ -236,6 +247,8 @@ class TimeInputModal(discord.ui.Modal, title="심층 제보"):
             embed.add_field(name="위치", value=location, inline=True)
             embed.add_field(name="남은 시간", value=f"{remaining_minutes}분", inline=True)
             embed.add_field(name="권한 그룹", value=deep_guild_auth, inline=True)
+            if comment:
+                embed.add_field(name="상세내용", value=comment, inline=False)
             embed.set_footer(text=f"제보자: {interaction.user.display_name} | ID: {deep_id}")
             
             # 채널에 메시지 전송 (신고 버튼 포함)
@@ -268,7 +281,7 @@ class TimeInputModal(discord.ui.Modal, title="심층 제보"):
                 logger.warning(f"원본 메시지 삭제 실패: {str(delete_error)}")
             
             # DM 전송 처리 - 권한 그룹별 알림 전송
-            await self.send_notifications(interaction, location, remaining_minutes, deep_guild_auth, deep_id)
+            await self.send_notifications(interaction, location, remaining_minutes, deep_guild_auth, deep_id, comment)
             
             # 성공 메시지 전송
             await interaction.followup.send("심층 제보가 성공적으로 등록되었습니다.", ephemeral=True)
@@ -286,7 +299,7 @@ class TimeInputModal(discord.ui.Modal, title="심층 제보"):
             logger.error(traceback.format_exc())  # 상세 오류 로그 추가
             await interaction.followup.send("제보 처리 중 오류가 발생했습니다.", ephemeral=True)
 
-    async def send_notifications(self, interaction, location, remaining_minutes, deep_guild_auth, deep_id):
+    async def send_notifications(self, interaction, location, remaining_minutes, deep_guild_auth, deep_id, comment=None):
         with SessionLocal() as db:
             try:
                 # 권한 그룹에 맞는 알림 사용자 조회 (모든 등록된 사용자)
@@ -324,6 +337,8 @@ class TimeInputModal(discord.ui.Modal, title="심층 제보"):
                 embed.add_field(name="남은 시간", value=f"{remaining_minutes}분", inline=True)
                 embed.add_field(name="권한 그룹", value=deep_guild_auth, inline=True)
                 embed.add_field(name="제보 채널", value=f"<#{interaction.channel.id}>", inline=False)
+                if comment:
+                    embed.add_field(name="코멘트", value=comment, inline=False)
                 embed.set_footer(text=f"서버: {interaction.guild.name} | ID: {deep_id}")
                 
                 # 확인된 사용자에게 DM 전송
