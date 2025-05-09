@@ -10,6 +10,45 @@ from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
+# Helper function to build the rank embed
+def _build_rank_embed(character_name: str, server_name: str, class_name: str,
+                        rank_position: str, power_value: str, change_amount: int,
+                        change_type: str, footer_text: str) -> discord.Embed:
+    """Helper function to create the rank information embed."""
+    # 순위 변동에 따른 색상 및 아이콘 결정
+    if change_amount == 0:
+        # 변동 없음 - 항상 회색으로 처리
+        embed_color = 0x95A5A6  # 회색
+        change_emoji = "-"
+        change_text = change_emoji
+    elif change_type == "up":
+        embed_color = 0x57F287  # 초록색
+        change_emoji = "↑"
+        change_text = f"{change_emoji} {change_amount}"
+    elif change_type == "down":
+        embed_color = 0xED4245  # 빨간색
+        change_emoji = "↓"
+        change_text = f"{change_emoji} {change_amount}"
+    else:
+        # 알 수 없는 타입 - 기본 회색
+        embed_color = 0x95A5A6
+        change_text = "-"
+
+    # 임베드 생성
+    embed = discord.Embed(
+        title=f"🏆 {character_name}",
+        color=embed_color,
+        description=f"**클래스**: {class_name} \n **서버**: {server_name}",
+    )
+
+    # 필드 추가
+    embed.add_field(name="🥇 랭킹", value=f"```{rank_position}```", inline=True)
+    embed.add_field(name="⚔️ 전투력", value=f"```{power_value}```", inline=True)
+    embed.add_field(name="📊 순위 변동", value=f"```{change_text}```", inline=True)
+
+    embed.set_footer(text=footer_text)
+    return embed
+
 # 랭크 조회를 위한 모달 클래스
 class RankModal(discord.ui.Modal, title='캐릭터 랭킹 조회'):
     server = discord.ui.TextInput(
@@ -40,7 +79,15 @@ class RankModal(discord.ui.Modal, title='캐릭터 랭킹 조회'):
             with RankSession() as db:
                 # 데이터베이스에서 캐릭터 랭킹 정보 조회 15분 이내 갱신된 데이터만
                 query = text("""
-                    SELECT * FROM mabinogi_ranking 
+                    SELECT
+                        character_name
+                        , server_name
+                        , class_name
+                        , TO_CHAR(rank_position, 'FM999,999,999') || '위' AS rank_position
+                        , TO_CHAR(power_value, 'FM999,999,999') AS power_value
+                        , change_amount
+                        , change_type
+                    FROM mabinogi_ranking
                     WHERE server_name = :server 
                     AND character_name = :character
                     AND retrieved_at >= NOW() - INTERVAL '15 minutes'
@@ -59,7 +106,7 @@ class RankModal(discord.ui.Modal, title='캐릭터 랭킹 조회'):
             logger.error(f"Database query error: {str(e)}\n{traceback.format_exc()}")
         
         if db_result:
-            character_info = db_result.get("character", {})
+            # character_info = db_result.get("character", {}) # This line seems unused if fields are directly accessed
             character_name = db_result.get("character_name", "알 수 없음")
             server_name = db_result.get("server_name", "알 수 없음")
             class_name = db_result.get("class_name", "알 수 없음")
@@ -68,38 +115,16 @@ class RankModal(discord.ui.Modal, title='캐릭터 랭킹 조회'):
             change_amount = db_result.get("change_amount", 0)
             change_type = db_result.get("change_type", "none")
 
-            # 순위 변동에 따른 색상 및 아이콘 결정
-            if change_amount == 0:
-                # 변동 없음 - 항상 회색으로 처리
-                embed_color = 0x95A5A6  # 회색
-                change_emoji = "-"
-                change_text = change_emoji
-            elif change_type == "up":
-                embed_color = 0x57F287  # 초록색
-                change_emoji = "↑"
-                change_text = f"{change_emoji} {change_amount}"
-            elif change_type == "down":
-                embed_color = 0xED4245  # 빨간색
-                change_emoji = "↓"
-                change_text = f"{change_emoji} {change_amount}"
-            else:
-                # 알 수 없는 타입 - 기본 회색
-                embed_color = 0x95A5A6
-                change_text = "-"
-
-            # 임베드 생성
-            embed = discord.Embed(
-                title=f"🏆 {character_name}",
-                color=embed_color,
-                description=f"**클래스**: {class_name} \n **서버**: {server_name}",
+            embed = _build_rank_embed(
+                character_name=character_name,
+                server_name=server_name,
+                class_name=class_name,
+                rank_position=str(rank_position), 
+                power_value=str(power_value),
+                change_amount=int(change_amount),
+                change_type=change_type,
+                footer_text="정보는 거의 실시간 조회 중입니다.(약간의 오차가 있을 수 있음)"
             )
-
-            # 필드 추가
-            embed.add_field(name="🥇 랭킹", value=f"```{rank_position}```", inline=True)
-            embed.add_field(name="⚔️ 전투력", value=f"```{power_value}```", inline=True)
-            embed.add_field(name="📊 순위 변동", value=f"```{change_text}```", inline=True)
-
-            embed.set_footer(text="정보는 실시간으로 업데이트 되지 않을 수 있습니다. 거의 실시간 조회 중입니다.")
 
             # 메시지 전송
             await interaction.followup.send(embed=embed)
@@ -138,42 +163,26 @@ class RankModal(discord.ui.Modal, title='캐릭터 랭킹 조회'):
                     class_name = character_info.get("class") or character_info.get("class_name", "알 수 없음")
                     rank_position = character_info.get("rank") or character_info.get("rank_position", "알 수 없음")
                     power_value = character_info.get("power") or character_info.get("power_value", "알 수 없음")
-                    change_amount = character_info.get("change") or character_info.get("change_amount", 0)
+                    # Ensure change_amount is treated as int for logic, API might return string or int
+                    raw_change_amount = character_info.get("change") or character_info.get("change_amount", 0)
+                    try:
+                        change_amount = int(raw_change_amount)
+                    except ValueError:
+                        change_amount = 0 # Default to 0 if conversion fails
+                        logger.warning(f"Could not convert change_amount '{raw_change_amount}' to int. Defaulting to 0.")
+
                     change_type = character_info.get("change_type", "none")
                     
-                    # 순위 변동에 따른 색상 및 아이콘 결정
-                    if change_amount == 0:
-                        # 변동 없음 - 항상 회색으로 처리
-                        embed_color = 0x95A5A6  # 회색
-                        change_emoji = "-"
-                        change_text = change_emoji
-                    elif change_type == "up":
-                        embed_color = 0x57F287  # 초록색
-                        change_emoji = "↑"
-                        change_text = f"{change_emoji} {change_amount}"
-                    elif change_type == "down":
-                        embed_color = 0xED4245  # 빨간색
-                        change_emoji = "↓"
-                        change_text = f"{change_emoji} {change_amount}"
-                    else:
-                        # 알 수 없는 타입 - 기본 회색
-                        embed_color = 0x95A5A6
-                        change_text = "-"
-
-                    
-                    # 임베드 생성
-                    embed = discord.Embed(
-                        title=f"🏆 {character_name}",
-                        color=embed_color,
-                        description=f"**클래스**: {class_name} \n **서버**: {server_name}",
+                    embed = _build_rank_embed(
+                        character_name=character_name,
+                        server_name=server_name,
+                        class_name=class_name,
+                        rank_position=str(rank_position), # Ensure string for display
+                        power_value=str(power_value),     # Ensure string for display
+                        change_amount=change_amount,      # Already int
+                        change_type=change_type,
+                        footer_text="정보는 거의 실시간 조회 중입니다.(약간의 오차가 있을 수 있음)"
                     )
-                    
-                    # 필드 추가
-                    embed.add_field(name="🥇 랭킹", value=f"```{rank_position}```", inline=True)
-                    embed.add_field(name="⚔️ 전투력", value=f"```{power_value}```", inline=True)
-                    embed.add_field(name="📊 순위 변동", value=f"```{change_text}```", inline=True)
-
-                    embed.set_footer(text="정보는 실시간으로 업데이트 되지 않습니다.")
                     
                     # 메시지 전송
                     await interaction.followup.send(embed=embed)
