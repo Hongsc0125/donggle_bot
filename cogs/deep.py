@@ -185,22 +185,21 @@ class TimeInputModal(discord.ui.Modal, title="심층 제보"):
             
             # 중복 등록 검사 개선
             with SessionLocal() as db:
-                recent_deep = check_recent_deep(db, location, interaction.guild.id, remaining_minutes, interaction.channel.id)
-                if (recent_deep):
-                    # 남은 시간 계산
-                    time_left = int(recent_deep["remaining_minutes"])
-                    await interaction.followup.send(f"이미 {location}에 대한 정보가 등록되어 있습니다. {time_left}분 후에 다시 시도해주세요.", ephemeral=True)
-                    return
-                
-                # 채널에 매핑된 권한 가져오기
-                deep_guild_auth = select_deep_auth_by_channel(db, interaction.guild.id, self.channel_id)
-                if not deep_guild_auth:
-                    await interaction.followup.send("채널에 권한 매핑이 설정되어 있지 않습니다.", ephemeral=True)
-                    return
-            
-            # 제보자 정보 저장 (remaining_minutes, deep_ch_id 추가)
-            with SessionLocal() as db:
                 try:
+                    # 중복 등록 검사 개선
+                    recent_deep = check_recent_deep(db, location, interaction.guild.id, remaining_minutes, interaction.channel.id)
+                    if (recent_deep):
+                        # 남은 시간 계산
+                        time_left = int(recent_deep["remaining_minutes"])
+                        await interaction.followup.send(f"이미 {location}에 대한 정보가 등록되어 있습니다. {time_left}분 후에 다시 시도해주세요.", ephemeral=True)
+                        return
+                    
+                    # 채널에 매핑된 권한 가져오기
+                    deep_guild_auth = select_deep_auth_by_channel(db, interaction.guild.id, self.channel_id)
+                    if not deep_guild_auth:
+                        await interaction.followup.send("채널에 권한 매핑이 설정되어 있지 않습니다.", ephemeral=True)
+                        return
+                    
                     # informant_deep_user 테이블에 제보자 정보 저장
                     result = insert_deep_informant(
                         db,
@@ -659,28 +658,39 @@ class DeepCog(commands.Cog):
             
             # 2. 각 메시지 상태에 따라 처리 - 유효한 메시지만 업데이트
             updated_count = 0
-            for deep_id, message in deep_report_messages.items():
+            for deep_id_str, message in deep_report_messages.items():
                 try:
-                    # 이미 오제보나 만료 상태인 메시지는 업데이트 하지 않음
-                    if deep_id in error_deep_ids or deep_id in expired_deep_ids:
-                        logger.debug(f"이미 오제보 또는 만료된 메시지 {deep_id} 업데이트 스킵")
+                    # DB에 해당 deep_id가 없는 경우 건너뛰기
+                    if deep_id_str not in db_deep_ids:
+                        logger.warning(f"채널 메시지 {message.id} (Deep ID: {deep_id_str})에 해당하는 DB 레코드가 없습니다. 건너뜁니다.")
                         continue
-                        
-                    # 유효한 메시지만 업데이트
-                    if deep_id in valid_deep_ids:
-                        # 유효한 메시지 처리 - 상호작용 갱신
-                        result = await self.refresh_valid_message(message, deep_id)
-                        if result:
-                            updated_count += 1
-                            logger.info(f"유효 메시지 {deep_id} 상호작용 갱신 완료")
+
+                    action_taken = False
+                    if deep_id_str in error_deep_ids:
+                        logger.debug(f"오류 메시지 {deep_id_str} 처리 시도.")
+                        if await self.mark_error_message(message, deep_id_str):
+                            action_taken = True
+                    elif deep_id_str in expired_deep_ids:
+                        logger.debug(f"만료 메시지 {deep_id_str} 처리 시도.")
+                        if await self.mark_expired_message(message, deep_id_str):
+                            action_taken = True
+                    elif deep_id_str in valid_deep_ids:
+                        logger.debug(f"유효 메시지 {deep_id_str} 처리 시도.")
+                        if await self.refresh_valid_message(message, deep_id_str):
+                            action_taken = True
                     else:
-                        # 알 수 없는 상태의 메시지 (DB에 없는 경우)
-                        logger.warning(f"알 수 없는 상태의 메시지: {deep_id} (DB에 정보 없음)")
+                        logger.warning(f"메시지 {deep_id_str} (ID: {message.id})는 DB에 있지만 상태가 불분명합니다.")
+                    
+                    if action_taken:
+                        updated_count += 1
+
+                except discord.NotFound:
+                    logger.warning(f"메시지 {deep_id_str} (ID: {message.id})를 찾을 수 없어 처리할 수 없습니다.")
                 except Exception as e:
-                    logger.error(f"메시지 {deep_id} 처리 중 오류: {e}")
+                    logger.error(f"메시지 {deep_id_str} (ID: {message.id}) 처리 중 오류: {e}")
                     logger.error(traceback.format_exc())
             
-            logger.info(f"채널 {channel_id}에서 총 {updated_count}개 메시지 상태 업데이트 완료")
+            logger.info(f"채널 {channel_id}에서 총 {updated_count}개 메시지 상태 업데이트 시도/완료")
             
             # 3. Select 메시지 처리 - 반드시 채널의 가장 마지막에 위치하도록 관리
             try:
@@ -751,6 +761,11 @@ class DeepCog(commands.Cog):
             
             # 제목에서 모든 상태 표시자 제거 후 오제보 표시 추가
             original_title = embed.title
+            # 이미 오제보 상태면 스킵
+            if "❌ [오제보]" in original_title:
+                logger.info(f"메시지 {deep_id} (ID: {message.id})는 이미 오제보 상태로 표시되어 있습니다. 스킵합니다.")
+                return True # 이미 올바른 상태이므로 성공으로 처리
+
             cleaned_title = self._clean_status_indicators(original_title)
             embed.title = f"❌ [오제보] {cleaned_title}"
             embed.color = discord.Color.red()
@@ -784,6 +799,11 @@ class DeepCog(commands.Cog):
             
             # 제목에서 모든 상태 표시자 제거 후 만료 표시 추가
             original_title = embed.title
+            # 이미 만료 상태면 스킵
+            if "⏰ [만료]" in original_title:
+                logger.info(f"메시지 {deep_id} (ID: {message.id})는 이미 만료 상태로 표시되어 있습니다. 스킵합니다.")
+                return True # 이미 올바른 상태이므로 성공으로 처리
+
             cleaned_title = self._clean_status_indicators(original_title)
             embed.title = f"⏰ [만료] {cleaned_title}"
             embed.color = discord.Color.greyple()
@@ -793,8 +813,9 @@ class DeepCog(commands.Cog):
             # 버튼 비활성화 - 신고 버튼이 있는 뷰 생성
             view = DeepReportView(deep_id)
             for item in view.children:
-                item.disabled = True
-                item.label = "만료됨"
+                if isinstance(item, discord.ui.Button): # 버튼인지 확인 (안전장치)
+                    item.disabled = True
+                    item.label = "만료됨" # "만료됨"으로 버튼 레이블 변경
             
             # 메시지 업데이트 전 로깅
             logger.info(f"메시지 {deep_id} (ID: {message.id}) 업데이트 시도 중...")
@@ -823,8 +844,18 @@ class DeepCog(commands.Cog):
             
             # 제목에서 모든 상태 표시자 제거 후 진행중 표시 추가
             original_title = embed.title
+            
+            # 이미 유효한 진행중 상태이고, 오류/만료 상태가 아니면 스킵
+            is_already_valid_display = "[진행중]" in original_title
+            is_error_or_expired_display = "⏰ [만료]" in original_title or "❌ [오제보]" in original_title
+
+            if is_already_valid_display and not is_error_or_expired_display:
+                logger.info(f"메시지 {deep_id} (ID: {message.id})는 이미 유효한 진행중 상태입니다. 스킵합니다.")
+                return True # 이미 올바른 상태이므로 성공으로 처리
+
             cleaned_title = self._clean_status_indicators(original_title)
             embed.title = f"[진행중] {cleaned_title}"
+            embed.color = discord.Color.dark_purple() # 원래 유효한 메시지의 색상으로 설정
             
             # 로그 추가
             logger.info(f"유효 메시지 {deep_id} 제목 변경: '{original_title}' → '{embed.title}'")
