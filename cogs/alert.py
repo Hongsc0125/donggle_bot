@@ -558,12 +558,13 @@ class DeepAlertToggleButton(discord.ui.Button):
 class AlertCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.check_alerts.start()
-        self.last_sent_alerts = {}  # 중복 방지를 위해 마지막 전송 알림 추적
+        # self.check_alerts.start()
+        self.last_sent_alerts = {}
         logger.info("AlertCog 초기화 완료")
     
     def cog_unload(self):
-        self.check_alerts.cancel()
+        # self.check_alerts.cancel()
+        pass
     
     @commands.Cog.listener()
     async def on_ready(self):
@@ -575,7 +576,7 @@ class AlertCog(commands.Cog):
             with SessionLocal() as db:
                 table_exists = check_alert_table_exists(db)
                 if not table_exists:
-                    logger.error("알림 테이블이 존재하지 않습니다! 테이블을 설정하려면 create_alert_tables.py를 실행하세요.")
+                    logger.error("알림 테이블 없음.")
                     return
             
             # 모든 길드의 알림 채널 초기화
@@ -654,6 +655,10 @@ class AlertCog(commands.Cog):
         """알림 설정 UI를 표시"""
         logger.info(f"알림설정 UI 표시: 사용자 {interaction.user.id}")
         try:
+            
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+
             # 이미 응답된 상호작용인지 확인
             if interaction.response.is_done():
                 logger.info("이미 응답된 상호작용입니다. followup 메시지를 사용합니다.")
@@ -807,127 +812,127 @@ class AlertCog(commands.Cog):
         # 알림 설정 UI 표시
         await self.show_alert_settings(interaction)
 
-    @tasks.loop(minutes=1)
-    async def check_alerts(self):
-        """매분마다 알림을 확인합니다"""
-        try:
-            now = datetime.now()
-            current_time = now.strftime('%H:%M:00')
+    # @tasks.loop(minutes=1)
+    # async def check_alerts(self):
+    #     """매분마다 알림을 확인합니다"""
+    #     try:
+    #         now = datetime.now()
+    #         current_time = now.strftime('%H:%M:00')
             
-            # 5분 후 경고 알림 시간 계산
-            warning_time = (now + timedelta(minutes=5)).strftime('%H:%M:00')
+    #         # 5분 후 경고 알림 시간 계산
+    #         warning_time = (now + timedelta(minutes=5)).strftime('%H:%M:00')
             
-            # 현재 요일 확인
-            day_of_week = DAY_OF_WEEK[now.weekday()]
+    #         # 현재 요일 확인
+    #         day_of_week = DAY_OF_WEEK[now.weekday()]
             
-            with SessionLocal() as db:
-                # 정각 알림 확인
-                exact_time_key = f"{current_time}-exact"
-                if exact_time_key not in self.last_sent_alerts or self.last_sent_alerts[exact_time_key] < now.date():
-                    await self.send_alerts(db, current_time, day_of_week, is_warning=False)
-                    self.last_sent_alerts[exact_time_key] = now.date()
+    #         with SessionLocal() as db:
+    #             # 정각 알림 확인
+    #             exact_time_key = f"{current_time}-exact"
+    #             if exact_time_key not in self.last_sent_alerts or self.last_sent_alerts[exact_time_key] < now.date():
+    #                 await self.send_alerts(db, current_time, day_of_week, is_warning=False)
+    #                 self.last_sent_alerts[exact_time_key] = now.date()
                 
-                # 5분 전 경고 알림 확인
-                warning_key = f"{warning_time}-warning"
-                if warning_key not in self.last_sent_alerts or self.last_sent_alerts[warning_key] < now.date():
-                    await self.send_alerts(db, warning_time, day_of_week, is_warning=True)
-                    self.last_sent_alerts[warning_key] = now.date()
+    #             # 5분 전 경고 알림 확인
+    #             warning_key = f"{warning_time}-warning"
+    #             if warning_key not in self.last_sent_alerts or self.last_sent_alerts[warning_key] < now.date():
+    #                 await self.send_alerts(db, warning_time, day_of_week, is_warning=True)
+    #                 self.last_sent_alerts[warning_key] = now.date()
         
-        except Exception as e:
-            logger.error(f"알림 체크 중 오류: {str(e)}")
+    #     except Exception as e:
+    #         logger.error(f"알림 체크 중 오류: {str(e)}")
     
-    @check_alerts.before_loop
-    async def before_check_alerts(self):
-        """알림 루프를 시작하기 전에 봇이 준비될 때까지 대기"""
-        await self.bot.wait_until_ready()
+    # @check_alerts.before_loop
+    # async def before_check_alerts(self):
+    #     """알림 루프를 시작하기 전에 봇이 준비될 때까지 대기"""
+    #     await self.bot.wait_until_ready()
     
-    async def send_alerts(self, db, alert_time, day_of_week, is_warning=False):
-        """사용자에게 알림 전송"""
-        try:
-            # 현재 시간에 대한 알림 가져오기
-            alerts = get_upcoming_alerts(db, alert_time, day_of_week)
+    # async def send_alerts(self, db, alert_time, day_of_week, is_warning=False):
+    #     """사용자에게 알림 전송"""
+    #     try:
+    #         # 현재 시간에 대한 알림 가져오기
+    #         alerts = get_upcoming_alerts(db, alert_time, day_of_week)
             
-            if not alerts:
-                return
+    #         if not alerts:
+    #             return
             
-            # 사용자별로 알림 그룹화
-            user_alerts = {}
-            for alert in alerts:
-                user_id = alert['user_id']
-                if not user_alerts.get(user_id):
-                    user_alerts[user_id] = []
-                user_alerts[user_id].append(alert)
+    #         # 사용자별로 알림 그룹화
+    #         user_alerts = {}
+    #         for alert in alerts:
+    #             user_id = alert['user_id']
+    #             if not user_alerts.get(user_id):
+    #                 user_alerts[user_id] = []
+    #             user_alerts[user_id].append(alert)
 
-            # 개발 환경에서는 알림을 봇 운영자에게만 전송
-            if settings.ENV == "development":
-                BOT_OPERATOR_ID = "307620267067179019"
+    #         # 개발 환경에서는 알림을 봇 운영자에게만 전송
+    #         if settings.ENV == "development":
+    #             BOT_OPERATOR_ID = "307620267067179019"
                 
-                # 운영자 ID가 있는 경우에만 유지, 다른 사용자는 필터링
-                filtered_alerts = {}
-                if BOT_OPERATOR_ID in user_alerts:
-                    filtered_alerts[BOT_OPERATOR_ID] = user_alerts[BOT_OPERATOR_ID]
+    #             # 운영자 ID가 있는 경우에만 유지, 다른 사용자는 필터링
+    #             filtered_alerts = {}
+    #             if BOT_OPERATOR_ID in user_alerts:
+    #                 filtered_alerts[BOT_OPERATOR_ID] = user_alerts[BOT_OPERATOR_ID]
                 
-                user_alerts = filtered_alerts
-                logger.info(f"개발 환경: 봇 운영자만 알림 받음 ({len(user_alerts)} 명)")
+    #             user_alerts = filtered_alerts
+    #             logger.info(f"개발 환경: 봇 운영자만 알림 받음 ({len(user_alerts)} 명)")
             
-            # 사용자에게 DM 전송
-            for user_id, user_alert_list in user_alerts.items():
-                try:
-                    user = await self.bot.fetch_user(int(user_id))
-                    if not user or user.bot:
-                        continue
+    #         # 사용자에게 DM 전송
+    #         for user_id, user_alert_list in user_alerts.items():
+    #             try:
+    #                 user = await self.bot.fetch_user(int(user_id))
+    #                 if not user or user.bot:
+    #                     continue
                     
-                    # 알림용 임베드 생성
-                    embed = discord.Embed(
-                        title="⏰ 알림" if not is_warning else "⚠️ 5분 전 알림",
-                        description=f"{'알림 시간입니다!' if not is_warning else '5분 후 설정한 알림이 있습니다!'}",
-                        color=discord.Color.red() if not is_warning else discord.Color.gold(),
-                        timestamp=datetime.now()
-                    )
+    #                 # 알림용 임베드 생성
+    #                 embed = discord.Embed(
+    #                     title="⏰ 알림" if not is_warning else "⚠️ 5분 전 알림",
+    #                     description=f"{'알림 시간입니다!' if not is_warning else '5분 후 설정한 알림이 있습니다!'}",
+    #                     color=discord.Color.red() if not is_warning else discord.Color.gold(),
+    #                     timestamp=datetime.now()
+    #                 )
                     
-                    # 유형별로 알림 그룹화
-                    alert_types = {}
-                    for alert in user_alert_list:
-                        alert_type = alert['alert_type']
-                        if not alert_types.get(alert_type):
-                            alert_types[alert_type] = []
-                        alert_types[alert_type].append(alert)
+    #                 # 유형별로 알림 그룹화
+    #                 alert_types = {}
+    #                 for alert in user_alert_list:
+    #                     alert_type = alert['alert_type']
+    #                     if not alert_types.get(alert_type):
+    #                         alert_types[alert_type] = []
+    #                     alert_types[alert_type].append(alert)
                     
-                    # 각 알림 유형에 대한 필드 추가
-                    for alert_type, alerts_of_type in alert_types.items():
-                        # 이미 처리된 알림 건너뛰기
-                        if is_warning and self.was_alert_sent(alerts_of_type[0], user_id):
-                            continue
+    #                 # 각 알림 유형에 대한 필드 추가
+    #                 for alert_type, alerts_of_type in alert_types.items():
+    #                     # 이미 처리된 알림 건너뛰기
+    #                     if is_warning and self.was_alert_sent(alerts_of_type[0], user_id):
+    #                         continue
                             
-                        type_name = ALERT_TYPE_NAMES.get(alert_type, alert_type)
-                        emoji = ALERT_TYPE_EMOJI.get(alert_type, '🔔')
-                        times = [alert['alert_time'].strftime('%H:%M') for alert in alerts_of_type]
-                        embed.add_field(
-                            name=f"{emoji} {type_name} 알림",
-                            value=f"시간: {', '.join(times)}",
-                            inline=False
-                        )
+    #                     type_name = ALERT_TYPE_NAMES.get(alert_type, alert_type)
+    #                     emoji = ALERT_TYPE_EMOJI.get(alert_type, '🔔')
+    #                     times = [alert['alert_time'].strftime('%H:%M') for alert in alerts_of_type]
+    #                     embed.add_field(
+    #                         name=f"{emoji} {type_name} 알림",
+    #                         value=f"시간: {', '.join(times)}",
+    #                         inline=False
+    #                     )
                     
-                    if len(embed.fields) > 0:
-                        try:
-                            await user.send(embed=embed)
-                            logger.info(f"알림 전송 완료: {user.name} ({user_id})")
-                        except discord.Forbidden:
-                            logger.warning(f"사용자 {user.name} ({user_id})에게 DM을 보낼 수 없습니다.")
-                        except Exception as e:
-                            logger.error(f"알림 전송 중 오류: {str(e)}")
+    #                 if len(embed.fields) > 0:
+    #                     try:
+    #                         await user.send(embed=embed)
+    #                         logger.info(f"알림 전송 완료: {user.name} ({user_id})")
+    #                     except discord.Forbidden:
+    #                         logger.warning(f"사용자 {user.name} ({user_id})에게 DM을 보낼 수 없습니다.")
+    #                     except Exception as e:
+    #                         logger.error(f"알림 전송 중 오류: {str(e)}")
                 
-                except Exception as e:
-                    logger.error(f"사용자 {user_id}에게 알림 전송 중 오류: {str(e)}")
+    #             except Exception as e:
+    #                 logger.error(f"사용자 {user_id}에게 알림 전송 중 오류: {str(e)}")
         
-        except Exception as e:
-            logger.error(f"알림 전송 중 오류: {str(e)}")
+    #     except Exception as e:
+    #         logger.error(f"알림 전송 중 오류: {str(e)}")
     
-    def was_alert_sent(self, alert, user_id):
-        """특정 알림이 오늘 이미 전송되었는지 확인"""
-        alert_id = alert['alert_id']
-        alert_key = f"{alert_id}-{user_id}"
-        return alert_key in self.last_sent_alerts and self.last_sent_alerts[alert_key] == datetime.now().date()
+    # def was_alert_sent(self, alert, user_id):
+    #     """특정 알림이 오늘 이미 전송되었는지 확인"""
+    #     alert_id = alert['alert_id']
+    #     alert_key = f"{alert_id}-{user_id}"
+    #     return alert_key in self.last_sent_alerts and self.last_sent_alerts[alert_key] == datetime.now().date()
 
 # Cog 등록
 async def setup(bot):
