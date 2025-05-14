@@ -112,7 +112,7 @@ class RecruitmentCog(commands.Cog):
 
         last_message = None
         try:
-            async for message in channel.history(limit=50, oldest_first=False):
+            async for message in channel.history(limit=5, oldest_first=False):
                 if (
                     message.author.id == self.bot.user.id and
                     message.components and
@@ -132,7 +132,7 @@ class RecruitmentCog(commands.Cog):
 
         if last_message:
             try:
-                async for message in channel.history(limit=50, oldest_first=False):
+                async for message in channel.history(limit=5, oldest_first=False):
                     if message.id != last_message.id and message.author.id == self.bot.user.id:
                         try:
                             await message.delete()
@@ -144,7 +144,7 @@ class RecruitmentCog(commands.Cog):
                 logger.warning(f"등록 채널 {channel_id} 버튼 갱신/정리 실패: {str(e)}")
         else:
             try:
-                async for message in channel.history(limit=50, oldest_first=False):
+                async for message in channel.history(limit=5, oldest_first=False):
                     if message.author.id == self.bot.user.id:
                         try:
                             await message.delete()
@@ -237,7 +237,7 @@ class RecruitmentCog(commands.Cog):
         # 불필요한 메시지 삭제 (봇이 보낸 메시지 중 현재 모집과 관련 없는 메시지만)
         try:
             deleted_count = 0
-            async for message in channel.history(limit=100):
+            async for message in channel.history(limit=5):
                 if message.id not in keep_message_ids and message.author.id == self.bot.user.id:
                     # 임베드 확인해서 모집 공고인지 확인 (푸터에 recruitment ID가 있는지)
                     is_recruitment = False

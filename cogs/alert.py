@@ -620,7 +620,7 @@ class AlertCog(commands.Cog):
         # 기존 버튼이 있는지 확인
         last_message = None
         try:
-            async for message in channel.history(limit=50, oldest_first=False):
+            async for message in channel.history(limit=5, oldest_first=False):
                 if (
                     message.author.id == self.bot.user.id and
                     message.components and

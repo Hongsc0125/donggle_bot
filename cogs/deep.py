@@ -472,7 +472,7 @@ class DeepCog(commands.Cog):
         select_message = None
         try:
             logger.debug(f"채널 {channel_id}에서 기존 Select 메시지 검색 중...")
-            async for message in channel.history(limit=50):
+            async for message in channel.history(limit=5):
                 if (message.author.id == self.bot.user.id and 
                     message.components and 
                     any("심층 위치 선택" in str(comp) for comp in message.components)):
