@@ -586,7 +586,7 @@ class DeepCog(commands.Cog):
         
         try:
             # 채널 내 메시지 조회 (최근 100개)
-            async for message in channel.history(limit=100):
+            async for message in channel.history(limit=5):
                 total_messages += 1
                 if message.author.id != self.bot.user.id:
                     continue
