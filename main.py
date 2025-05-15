@@ -57,7 +57,7 @@ class Donggle(commands.Bot):
             "cogs.channel",
             "cogs.recruitment",
             "cogs.voice_channel",
-            "cogs.deep",
+            # "cogs.deep",
             "cogs.alert",
             "cogs.chat_assistant",
             # "cogs.rank"
