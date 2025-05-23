@@ -2,27 +2,30 @@ import logging
 import traceback
 import discord
 from discord.ext import commands, tasks
+from discord import app_commands
 from core.config import settings
 from openai import OpenAI
 from datetime import datetime
 from db.session import SessionLocal
 from queries.channel_query import select_chatbot_channel
+import typing
 from typing import List, Dict, Any, Optional
 
 # 로거 설정
 logger = logging.getLogger("cogs.chat_assistant")
 
-key=settings.DEEPSEEK_API_KEY
+# API 키 설정 (DeepSeek API 키 사용)
+key = settings.DEEPSEEK_API_KEY
 
-
-class NonsenseChatbot(commands.Cog):
+class SummaryAssistant(commands.Cog):
     """
-    헛소리봇 - 채널의 대화 맥락을 기반으로 엉뚱하고 재미있는 답변을 제공하는 Discord 챗봇
+    메시지 요약 도우미 - 채널의 대화 맥락을 기반으로 요약본을 제공하는 Discord 챗봇
     
     특징:
-    - 채널의 최근 대화 맥락을 이해해 관련 있는 헛소리 생성
-    - 5분 이상 대화가 없으면 자동으로 헛소리 발생
+    - 채널의 최근 대화 맥락을 이해해 요약 생성
+    - 유저가 안 읽은 내용을 요약하여 임퍼럴 메시지로 전송
     """
+    
     def __init__(self, bot):
         self.bot = bot
         self.client = OpenAI(
@@ -34,28 +37,34 @@ class NonsenseChatbot(commands.Cog):
         self.MAX_DISCORD_LENGTH = 2000
         self.DEFAULT_MAX_TOKENS = 1000
         
-        # 메시지 캐시 (채널별로 최근 대화 저장)
+        # 메시지 캠시 (채널별로 최근 대화 저장)
         self.message_history = {}
-        self.MAX_HISTORY = 30  # 30개 메시지로 확장
+        self.MAX_HISTORY = 50  # 50개 메시지로 확장
         
         # 채널별 마지막 메시지 시간 추적
         self.last_message_time = {}
-        self.INACTIVE_THRESHOLD = 5 * 60  # 5분 (초 단위)
+        
+        # 채널 목록 캠시
+        self.chatbot_channels = {}
+        # 메시지 캐시 (채널별로 최근 대화 저장)
+        self.message_history = {}
+        self.MAX_HISTORY = 50  # 50개 메시지로 확장
+        
+        # 채널별 마지막 메시지 시간 추적
+        self.last_message_time = {}
         
         # 채널 목록 캐시
         self.chatbot_channels = {}
         
-        # 페르소나 추적 - 메시지 ID와 사용된 캐릭터를 연결
-        self.persona_history = {}  # {message_id: character_name}
-        # 채널별 마지막 사용 페르소나
-        self.last_used_persona = {}  # {channel_id: character_name}
+        # 유저별 마지막 읽은 메시지 ID
+        self.last_read_message = {}  # {channel_id: {user_id: last_read_message_id}}
         
-        # 비활성 채널 감지 백그라운드 작업 시작
-        self.check_inactive_channels.start()
+        # 사용자별 채널별 마지막 접속 시간
+        self.last_user_activity = {}  # {channel_id: {user_id: last_activity_timestamp}}
     
     def cog_unload(self):
         """코그가 언로드될 때 호출되는 메서드"""
-        self.check_inactive_channels.cancel()
+        pass
     
     async def load_chatbot_channels(self):
         """DB에서 봇 채널 목록 로드"""
@@ -69,188 +78,113 @@ class NonsenseChatbot(commands.Cog):
                     if chatbot_channel_id:
                         self.chatbot_channels[guild_id] = str(chatbot_channel_id)
                 
-                logger.info(f"chatbot 채널 {len(self.chatbot_channels)}개 로드됨")
+                logger.info(f"요약 봇 채널 {len(self.chatbot_channels)}개 로드됨")
         except Exception as e:
             logger.error(f"봇 채널 로드 중 오류: {e}")
             logger.error(traceback.format_exc())
     
-    @tasks.loop(seconds=30)  # 30초마다 확인
-    async def check_inactive_channels(self):
-        """일정 시간 동안 비활성 상태인 채널 감지"""
-        try:
-            # 봇이 준비되지 않았으면 스킵
-            if not self.bot.is_ready():
-                return
-                
-            # 채널 목록 로드 (처음 실행 시)
-            if not self.chatbot_channels:
-                await self.load_chatbot_channels()
-                
-            current_time = datetime.now()
-            channels_to_check = []
-            
-            # 활성 채널 목록 구성 - 챗봇 채널로 설정된 채널만 확인
-            for guild_id, channel_id in self.chatbot_channels.items():
-                try:
-                    channel = self.bot.get_channel(int(channel_id))
-                    if channel:
-                        channels_to_check.append(channel)
-                except Exception as e:
-                    logger.error(f"채널 {channel_id} 가져오기 실패: {e}")
-            
-            # 각 채널 확인
-            for channel in channels_to_check:
-                channel_id = str(channel.id)
-                
-                # 채널에 메시지 이력이 있고, 마지막 메시지 시간이 기록되어 있는 경우
-                if channel_id in self.last_message_time:
-                    last_time = self.last_message_time[channel_id]
-                    elapsed_seconds = (current_time - last_time).total_seconds()
-                    
-                    # 5분 이상 비활성 상태
-                    if elapsed_seconds >= self.INACTIVE_THRESHOLD:
-                        logger.info(f"채널 {channel.name} ({channel_id}) 비활성 감지: {elapsed_seconds:.0f}초 경과")
-                        
-                        # 히스토리 가져오기
-                        history = self.get_channel_history(channel_id)
-                        
-                        # 히스토리가 충분히 있는 경우에만 자동 헛소리
-                        if len(history) >= 3:  # 최소 3개 메시지가 있어야 맥락 파악 가능
-                            # 마지막 메시지가 봇이 아닌 경우에만 자동 헛소리
-                            if not self.is_last_message_from_bot(channel_id):
-                                # 자동 헛소리 생성 및 전송
-                                await self.send_random_nonsense(channel, history)
-                                
-                                # 마지막 메시지 시간 업데이트
-                                self.last_message_time[channel_id] = current_time
-        except Exception as e:
-            logger.error(f"비활성 채널 확인 중 오류 발생: {e}")
-            logger.error(traceback.format_exc())
-    
-    def is_last_message_from_bot(self, channel_id):
-        """채널의 마지막 메시지가 봇에서 온 것인지 확인"""
-        channel_id = str(channel_id)
-        history = self.message_history.get(channel_id, [])
-        
-        if not history:
-            return False
-            
-        # 채널 이력에서 마지막 메시지의 작성자가 "[헛소리봇]"으로 시작하는지 확인
-        last_msg = history[-1]
-        return "[헛소리봇]" in last_msg.get("content", "")
-    
-    @check_inactive_channels.before_loop
-    async def before_check_inactive_channels(self):
-        """봇이 준비될 때까지 대기"""
-        await self.bot.wait_until_ready()
-        logger.info("비활성 채널 감지 루프 시작됨")
-    
-    async def send_random_nonsense(self, channel, history):
-        """자동 헛소리 생성 및 전송"""
-        try:
-            # 채널에 타이핑 시작
-            async with channel.typing():
-                # 자동 헛소리 생성 - 채널의 마지막 페르소나 사용 또는 새로 선택
-                channel_id = str(channel.id)
-                last_persona = self.last_used_persona.get(channel_id)
-                
-                # 자동 헛소리 생성
-                nonsense = await self.generate_nonsense("", history, is_auto=True, forced_character=last_persona)
-                
-                if nonsense:
-                    # 응답에서 캐릭터 이름 추출
-                    character_name, content = self.extract_character_name(nonsense)
-                    
-                    # [헛소리봇] 접두어 추가
-                    formatted_message = f"[헛소리봇] {content}"
-                    
-                    # 메시지 전송 (답장이 아닌 새 메시지로)
-                    message = await channel.send(formatted_message)
-                    
-                    # 페르소나 추적 업데이트
-                    if character_name:
-                        self.persona_history[str(message.id)] = character_name
-                        self.last_used_persona[channel_id] = character_name
-                    
-                    logger.info(f"비활성 채널 {channel.name}에 자동 헛소리 전송 (캐릭터: {character_name}, 길이: {len(content)}자)")
-        except Exception as e:
-            logger.error(f"자동 헛소리 전송 중 오류: {e}")
-    
     @commands.Cog.listener()
-    async def on_message(self, message):
-        """
-        Discord 채널의 메시지를 감지하여 처리합니다.
-        """
+    async def on_ready(self):
+        """봇이 준비되었을 때 호출되는 이벤트"""
+        await self.load_chatbot_channels()
+        logger.info("요약 어시스턴트가 준비되었습니다.")
+    
+    async def cog_load(self):
+        """코그가 로드될 때 호출되는 메서드"""
+        logger.info("요약 어시스턴트 코그가 로드되었습니다.")
+        
+        # 메시지 이벤트 등록 - 메시지 히스토리를 위해 필요
+        self.bot.add_listener(self.on_message_create, "on_message")
+    
+    async def on_message_create(self, message):
+        """메시지 이벤트 처리 - 히스토리 추적용"""
         # 봇 메시지는 무시
         if message.author.bot:
             return
         
-        # 현재 채널이 챗봇 채널인지 확인
-        with SessionLocal() as db:
-            chatbot_channel_id = select_chatbot_channel(db, message.guild.id)
-            
-            # 챗봇 채널이 설정되어 있고, 현재 채널이 챗봇 채널이 아니면 무시
-            if chatbot_channel_id and str(message.channel.id) != str(chatbot_channel_id):
-                return
-        
-        # 마지막 메시지 시간 업데이트
-        channel_id = str(message.channel.id)
-        self.last_message_time[channel_id] = datetime.now()
-        
         # 메시지 히스토리에 추가
         self.add_to_history(message)
+    
+    # 요약 명령어 - 채널의 일반 요약
+    @app_commands.command(name="요약", description="현재 채널의 대화 내용을 요약합니다")
+    @app_commands.describe(
+        전송_방식="요약을 받을 방식을 선택합니다 (공개: 채널에 공개적으로 표시, 개인: 개인만 보이는 메시지로 전송)", 
+        요약_범위="요약할 메시지의 범위를 선택합니다 (최근: 최근 50개 메시지, 안읽은것: 읽지 않은 메시지만)",
+    )
+    async def summarize(self, interaction: discord.Interaction, 
+                       전송_방식: typing.Literal["공개", "개인"],
+                       요약_범위: typing.Literal["최근", "안읽은것"]):
+        # 명령어 응답 지연 (서버에서 처리하는 데 시간이 걸릴 수 있으므로)
+        await interaction.response.defer(ephemeral=True)
+        
+        # 채널 ID 확인
+        channel_id = str(interaction.channel_id)
+        user_id = str(interaction.user.id)
+        
+        # 현재 사용자의 활동 시간 업데이트
+        self.update_user_activity_from_interaction(interaction)
+        
+        try:
+            # 요약할 메시지 가져오기
+            messages_to_summarize = []
+            is_private_mode = 전송_방식 == "개인"
             
-        # 봇이 언급되었거나 "동글" 키워드가 있거나 봇의 메시지에 답장하는 경우
-        is_reply_to_bot = message.reference and message.reference.resolved and message.reference.resolved.author.id == self.bot.user.id
-        
-        if self.bot.user.mentioned_in(message) or "동글" in message.content.lower() or is_reply_to_bot:
-            async with message.channel.typing():
-                # 채널 히스토리 가져오기
-                history = self.get_channel_history(message.channel.id)
+            # 요약 범위에 따라 메시지 선택
+            if 요약_범위 == "안읽은것":
+                # 읽지 않은 메시지만 요약
+                messages_to_summarize = self.get_unread_messages(channel_id, user_id)
+                summary_type = "안읽은 메시지"
+                additional_instruction = "사용자가 읽지 않은 내용만 요약해주세요."
+            else:  # "최근"
+                # 최근 50개 메시지 요약
+                messages_to_summarize = self.get_channel_history(channel_id, limit=50)
+                summary_type = "최근 메시지"
+                additional_instruction = "최근 50개의 메시지를 요약해주세요."
+            
+            # 메시지 검사
+            if not messages_to_summarize or len(messages_to_summarize) < 3:
+                if 요약_범위 == "읽지않음":
+                    await interaction.followup.send("읽지 않은 메시지가 없거나 충분하지 않습니다.", ephemeral=True)
+                else:
+                    await interaction.followup.send("요약할 메시지가 충분하지 않습니다. 더 많은 대화가 필요합니다.", ephemeral=True)
+                return
+            
+            # 사용자가 입력한 추가 지시사항이 있는 경우 추가
+            if 추가_지시사항:
+                additional_instruction = f"{additional_instruction}\n{추가_지시사항}"
+            
+            # 요약 생성
+            summary = await self.generate_summary(messages_to_summarize, additional_instruction)
+            
+            if not summary:
+                await interaction.followup.send("요약을 생성할 수 없습니다. 나중에 다시 시도해주세요.", ephemeral=True)
+                return
                 
-                # 이전 페르소나 확인 - 봇 메시지에 답장하는 경우
-                forced_character = None
-                if is_reply_to_bot:
-                    referenced_msg_id = str(message.reference.message_id)
-                    forced_character = self.persona_history.get(referenced_msg_id)
-                    logger.info(f"메시지 {referenced_msg_id}에 대한 답장. 이전 캐릭터: {forced_character}")
-                
-                # 채널 마지막 페르소나 (없으면 새로 선택)
-                if not forced_character:
-                    forced_character = self.last_used_persona.get(channel_id)
-                
-                # 헛소리 응답 생성 - 이전 페르소나 사용
-                response = await self.generate_nonsense(message.content, history, forced_character=forced_character)
-                
-                if response:
-                    # 응답에서 캐릭터 이름 추출
-                    character_name, content = self.extract_character_name(response)
+            # [요약] 접두어 추가
+            formatted_response = f"[요약 - {summary_type}] {summary}"
+            
+            # 전송 방식에 따라 요약 전송
+            if is_private_mode:  # 개인 메시지로 전송
+                try:
+                    # 개인 메시지로 전송
+                    await interaction.user.send(formatted_response)
                     
-                    # [헛소리봇] 접두어 추가
-                    formatted_response = f"[헛소리봇] {content}"
+                    # 요청한 채널에는 성공 메시지만 전송
+                    await interaction.followup.send(f"{summary_type} 요약을 개인에게만 보이도록 전송했습니다.", ephemeral=True)
                     
-                    # 응답 전송 (답장 형식으로) - message.reply를 사용하여 대화맥락 유지
-                    try:
-                        reply_msg = await message.reply(formatted_response, mention_author=False)
-                        
-                        # 페르소나 추적 업데이트
-                        if character_name:
-                            self.persona_history[str(reply_msg.id)] = character_name
-                            self.last_used_persona[channel_id] = character_name
-                            
-                        logger.info(f"대화 응답 전송 (캐릭터: {character_name}, 채널: {message.channel.name}, 길이: {len(formatted_response)}자)")
-                    except Exception as e:
-                        # 답장 실패 시 일반 메시지로
-                        sent_msg = await message.channel.send(formatted_response)
-                        
-                        # 페르소나 추적 업데이트
-                        if character_name:
-                            self.persona_history[str(sent_msg.id)] = character_name
-                            self.last_used_persona[channel_id] = character_name
-                            
-                        logger.warning(f"답장 실패로 일반 메시지 전송: {e}")
+                    logger.info(f"개인 요약 전송 완료 (사용자: {interaction.user.name}, 유형: {summary_type}, 길이: {len(summary)}자)")
+                except Exception as e:
+                    logger.error(f"개인 요약 전송 실패: {e}")
+                    await interaction.followup.send("개인 메시지 전송 중 오류가 발생했습니다", ephemeral=True)
+            else:  # 채널에 공개적으로 전송
+                # 포맷팅된 요약 전송 (모든 사용자가 볼 수 있게 ephemeral=False)
+                await interaction.channel.send(formatted_response)
+                logger.info(f"요약 전송 완료 (채널: {interaction.channel.name}, 유형: {summary_type}, 길이: {len(summary)}자)")
         
-        # 다른 메시지는 무시하고 비활성 채널 감지 로직이 처리하도록 함
+        except Exception as e:
+            logger.error(f"요약 생성 중 오류 발생: {e}")
+            logger.error(traceback.format_exc())
+            await interaction.followup.send("요약 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.", ephemeral=True)
     
     def add_to_history(self, message):
         """채널별 메시지 히스토리에 메시지 추가"""
@@ -262,6 +196,7 @@ class NonsenseChatbot(commands.Cog):
         # 메시지 정보 저장
         self.message_history[channel_id].append({
             "author": message.author.name,
+            "author_id": str(message.author.id),
             "content": message.content,
             "timestamp": datetime.now().isoformat(),
             "id": message.id
@@ -271,260 +206,133 @@ class NonsenseChatbot(commands.Cog):
         if len(self.message_history[channel_id]) > self.MAX_HISTORY:
             self.message_history[channel_id].pop(0)
     
-    def get_channel_history(self, channel_id):
-        """채널 히스토리 가져오기"""
-        channel_id = str(channel_id)
-        history = self.message_history.get(channel_id, [])
+    def get_channel_history(self, channel_id, limit=None):
+        """채널 히스토리 가져오기
         
-        # 사람이 읽기 쉬운 형태로 변환
+        Args:
+            channel_id (str): 채널 ID
+            limit (int, optional): 가져올 최대 메시지 수. 기본값은 None (모든 메시지 반환)
+        
+        Returns:
+            list: 메시지 히스토리 목록
+        """
+        channel_id = str(channel_id)
+        if channel_id not in self.message_history:
+            return []
+        
+        # 전체 히스토리 가져오기
+        history = self.message_history[channel_id]
+        
+        # limit이 지정된 경우 최근 메시지만 반환
+        if limit and len(history) > limit:
+            history = history[-limit:]
+        
+        # 사람이 읽기 쉽도록 형태로 변환
         formatted_history = []
         for msg in history:
             formatted_history.append(f"{msg['author']}: {msg['content']}")
             
         return formatted_history
 
-    def extract_character_name(self, response):
-        """응답 텍스트에서 캐릭터 이름 추출"""
-        try:
-            # 캐릭터 이름이 '이름:' 형식으로 시작하는지 확인
-            lines = response.split('\n', 1)
-            first_line = lines[0].strip()
+    def update_user_activity(self, message):
+        """메시지 객체로부터 사용자의 활동 시간 업데이트"""
+        channel_id = str(message.channel.id)
+        user_id = str(message.author.id)
+        
+        # 채널별 사용자 활동 데이터 초기화
+        if channel_id not in self.last_user_activity:
+            self.last_user_activity[channel_id] = {}
             
-            # 이름: 형식이나 이름 (상황설명): 형식 확인
-            colon_pos = first_line.find(':')
-            if colon_pos > 0:
-                character_name = first_line[:colon_pos].strip()
-                
-                # 괄호가 있는 경우 괄호 이전까지만 추출
-                if '(' in character_name:
-                    character_name = character_name.split('(')[0].strip()
-                
-                # 캐릭터 이름 유효성 검사 - 알려진 캐릭터인지
-                valid_characters = ["나오", "타르라크", "던컨", "티이", "카단", "마리", "루에리", "크리스텔", "마우러스", "모르간트"]
-                if character_name in valid_characters:
-                    # 첫 줄(캐릭터 이름)을 제외한 내용 반환
-                    content = response[colon_pos+1:].strip()
-                    
-                    # 줄바꿈이 있었으면 포함
-                    if len(lines) > 1:
-                        content = content + "\n" + lines[1]
-                        
-                    return character_name, content
+        # 현재 사용자의 활동 시간 업데이트
+        self.last_user_activity[channel_id][user_id] = datetime.now()
+        
+        # 마지막으로 읽은 메시지 ID 업데이트
+        if channel_id not in self.last_read_message:
+            self.last_read_message[channel_id] = {}
             
-            # 형식에 맞지 않으면 원본 반환
-            return None, response
-        except Exception as e:
-            logger.error(f"캐릭터 이름 추출 중 오류: {e}")
-            return None, response
+        # 현재 사용자가 읽은 메시지 ID 업데이트
+        if len(self.message_history.get(channel_id, [])) > 0:
+            last_msg_id = self.message_history[channel_id][-1].get("id")
+            self.last_read_message[channel_id][user_id] = last_msg_id
+            
+        logger.debug(f"사용자 {user_id} 활동 시간 업데이트 (채널: {channel_id})")
+    
+    def update_user_activity_from_interaction(self, interaction):
+        """슬래시 명령어 상호작용에서 사용자의 활동 시간 업데이트"""
+        channel_id = str(interaction.channel_id)
+        user_id = str(interaction.user.id)
+        
+        # 채널별 사용자 활동 데이터 초기화
+        if channel_id not in self.last_user_activity:
+            self.last_user_activity[channel_id] = {}
+            
+        # 현재 사용자의 활동 시간 업데이트
+        self.last_user_activity[channel_id][user_id] = datetime.now()
+        
+        # 마지막으로 읽은 메시지 ID 업데이트
+        if channel_id not in self.last_read_message:
+            self.last_read_message[channel_id] = {}
+            
+        # 현재 사용자가 읽은 메시지 ID 업데이트 (마지막 메시지 기준)
+        if len(self.message_history.get(channel_id, [])) > 0:
+            last_msg_id = self.message_history[channel_id][-1].get("id")
+            self.last_read_message[channel_id][user_id] = last_msg_id
+            
+        logger.debug(f"사용자 {user_id} 활동 시간 업데이트 (채널: {channel_id}, 슬래시 명령어)")
 
-    async def generate_nonsense(self, context: str, history: List[str], is_auto=False, forced_character=None) -> Optional[str]:
+    def get_unread_messages(self, channel_id, user_id):
+        """사용자가 읽지 않은 메시지 가져오기"""
+        channel_id = str(channel_id)
+        user_id = str(user_id)
+        
+        # 채널 히스토리 가져오기
+        history = self.message_history.get(channel_id, [])
+        
+        # 사용자의 마지막 읽은 메시지 ID 가져오기
+        last_read_id = None
+        if channel_id in self.last_read_message and user_id in self.last_read_message[channel_id]:
+            last_read_id = self.last_read_message[channel_id][user_id]
+        
+        # 읽지 않은 메시지 찾기
+        unread_messages = []
+        found_last_read = False if last_read_id else True
+        
+        for msg in history:
+            msg_id = msg.get("id")
+            
+            # 마지막 읽은 메시지를 찾았다면 이후 메시지를 추가
+            if found_last_read:
+                # 자기 자신의 메시지는 제외
+                if user_id != msg.get("author_id", ""):
+                    unread_messages.append(f"{msg['author']}: {msg['content']}")
+            elif msg_id == last_read_id:
+                found_last_read = True
+        
+        return unread_messages
+
+    async def generate_summary(self, history: List[str], additional_instruction: str = "") -> Optional[str]:
         """
-        사용자 입력과 대화 히스토리를 기반으로 엉뚱하고 재미있는 응답을 생성합니다.
-        is_auto: 자동 생성 여부 (True인 경우 대화 촉진 역할)
-        forced_character: 강제할 캐릭터 이름 (대화 연속성을 위해)
+        대화 히스토리를 기반으로 요약을 생성합니다.
         """
         try:
             # 채팅 히스토리 포맷팅
-            history_text = "\n".join(history[-30:]) if history else "대화 내역 없음"
+            history_text = "\n".join(history[-50:]) if history else "대화 내역 없음"
             
-            # 랜덤한 캐릭터 선택을 강제하기 위해 타임스탬프 기반 시드 사용
-            import random
-            import time
-            
-            # 캐릭터 목록
-            characters = ["나오", "타르라크", "던컨", "티이", "카단", "마리", "루에리", "크리스텔", "마우러스", "모르간트"]
-            
-            # 이전 대화의 캐릭터가 있으면 해당 캐릭터 사용, 없으면 랜덤 선택
-            if forced_character and forced_character in characters:
-                selected_character = forced_character
-                logger.info(f"이전 대화의 캐릭터 계속 사용: {selected_character}")
-            else:
-                # 현재 시간을 기반으로 시드 설정 (매번 다른 결과 보장)
-                random.seed(int(time.time()))
-                selected_character = random.choice(characters)
-                logger.info(f"새 캐릭터 선택됨: {selected_character}")
-            
-            # 따옴표 사용 방식 변경 및 f-string 분리하여 에러 방지
-            system_prompt = f"""
-            당신은 모바일 MMORPG '마비노기 모바일'의 NPC입니다. 이번 대화에서는 반드시 '{selected_character}' 캐릭터로 역할극(Roleplay)하세요:
-            """
-            
-            # JSON 부분은 f-string이 아닌 일반 문자열로 처리
-            system_prompt += """
-            {
-            "characters": [
-                {
-                "name": "나오",
-                "traits": {
-                    "speech_style": "다정하고 따뜻하며 가끔 엉뚱한 말투 (~하길 바라~)",
-                    "personality": "상냥하고 엉뚱함",
-                    "interests": ["여행", "선물", "고양이", "악기 연주"],
-                    "locations": ["티르코네일"]
-                },
-                "examples": [
-                    "이 빵 맛있는데 한 조각 먹어볼래?",
-                    "저기 저 고양이 보이네? 같이 가보지 않을래~?"
-                ]
-                },
-                {
-                "name": "타르라크",
-                "traits": {
-                    "speech_style": "학자적이고 고풍스러운 말투 (~것이니라, ~하도록)",
-                    "personality": "지혜롭고 차분함",
-                    "interests": ["마법 연구", "허브", "낚시"],
-                    "locations": ["티르코네일", "호수"]
-                },
-                "examples": [
-                    "이 마법서의 127페이지를 펴보게나.",
-                    "이 허브는 달빛 아래서 채취해야 진정한 효능이 드러나는 법이지."
-                ]
-                },
-                {
-                "name": "던컨",
-                "traits": {
-                    "speech_style": "위엄 있고 존댓말 사용 (~하시오, ~바라네)",
-                    "personality": "인자하고 책임감 있음",
-                    "interests": ["마을 관리", "역사"],
-                    "locations": ["티르코네일 마을"]
-                },
-                "examples": [
-                    "마을을 위해 힘써주어 고맙네, 여행자님.",
-                    "이 고목은 백 년 전 전쟁 때부터 자리를 지키고 있지."
-                ]
-                },
-                {
-                "name": "티이",
-                "traits": {
-                    "speech_style": "밝고 친절한 서비스 어조 (~해드릴까요?, ~하셨어요?)",
-                    "personality": "다정하고 세심함",
-                    "interests": ["요리", "여관 일"],
-                    "locations": ["콜헨 여관"]
-                },
-                "examples": [
-                    "오늘의 특선 요리는 수제 팬케이크입니다!",
-                    "따뜻한 방 준비해드릴게요~ 편하게 쉬세요."
-                ]
-                },
-                {
-                "name": "카단",
-                "traits": {
-                    "speech_style": "무뚝뚝하고 간결한 말투",
-                    "personality": "과묵하지만 보호심 강함",
-                    "interests": ["검술", "티이 보호"],
-                    "locations": ["콜헨 여관 주변"]
-                },
-                "examples": [
-                    "신경 쓰지 마. 내가 처리하지.",
-                    "티이는 괜찮다. 나한테 맡겨."
-                ]
-                },
-                {
-                "name": "마리",
-                "traits": {
-                    "speech_style": "활기차고 씩씩한 말투",
-                    "personality": "긍정적이고 용감함",
-                    "interests": ["활쏘기", "모험"],
-                    "locations": ["티르코네일"]
-                },
-                "examples": [
-                    "다녀오자! 나만 믿어!",
-                    "과녁은 절대 빗나가지 않아!"
-                ]
-                },
-                {
-                "name": "루에리",
-                "traits": {
-                    "speech_style": "열정적이고 용감한 말투",
-                    "personality": "충동적이지만 의협심 강함",
-                    "interests": ["모험", "전투"],
-                    "locations": ["티르코네일"]
-                },
-                "examples": [
-                    "내 검으로 널 지켜주겠어!",
-                    "싸울 준비 됐지? 가자!"
-                ]
-                },
-                {
-                "name": "크리스텔",
-                "traits": {
-                    "speech_style": "차분하고 겸손한 말투",
-                    "personality": "온화하고 친절함",
-                    "interests": ["기도", "신앙", "봉사"],
-                    "locations": ["던바튼"]
-                },
-                "examples": [
-                    "기도실로 안내해드릴게요.",
-                    "환영합니다. 천천히 둘러보세요."
-                ]
-                },
-                {
-                "name": "마우러스",
-                "traits": {
-                    "speech_style": "중후하고 예언자 같은 말투",
-                    "personality": "신비롭고 현명함",
-                    "interests": ["고대 마법", "드루이드 지식"],
-                    "locations": ["베른 연구소"]
-                },
-                "examples": [
-                    "오랜 시간이었군. 준비는 되어 있나?",
-                    "지혜는 기다림에서 오는 법이다."
-                ]
-                },
-                {
-                "name": "모르간트",
-                "traits": {
-                    "speech_style": "위협적이고 오만한 말투",
-                    "personality": "냉혹하고 전략적",
-                    "interests": ["지배", "전쟁"],
-                    "locations": ["마족 침공 지역"]
-                },
-                "examples": [
-                    "이제 이곳의 지배자는 나다.",
-                    "항복하지 않으면 죽음뿐이다."
-                ]
-                }
-            ],
-            "interaction_rules": {
-                "context_awareness": {
-                "location_based": "대화 내용에 따라 게임 내 지역, 등장인물, 시간대를 포함해야 함",
-                "time_based": "아침/점심/저녁에 맞는 인사 포함"
-                },
-                "persona_selection": {
-                "auto_detect": "랜덤으로 NPC 자동 선택",
-                "fallback": "랜덤으로 NPC 선택"
-                }
-            }
-            }
-            """
-            
-            system_prompt += f"""
-            <중요 규칙>
-            1. 이번 대화에서는 반드시 {selected_character} 캐릭터만 연기할 것! 다른 캐릭터로 바꾸지 말 것!
-            2. 대화의 히스토리 전체를 모두 읽고 대답할 것.
-            3. 반드시 NPC 역할에 몰입하여 대화할 것
-            4. 괄호 안 해설이나 메타 언어 사용 금지
-            5. 현실 세계 정보, 시스템 언급 절대 금지
-            6. 유저를 부를 때는 항상 '여행자님'이라고 지칭할 것
-            7. 응답 첫 줄에 반드시 '{selected_character}:'을 명시하고 바로 대화 시작할 것 (다른 형식 사용 금지)
-            8. 왜 그런 대답을 했는지 설명하거나 분석하지 말고, 무조건 Roleplay 응답만 출력할 것
-            9. 메시지 히스토리를 보고 최대한 중복되는 행동양식이나 대화는 피할 것
-            10. 대화의 흐름을 자연스럽게 이어가고, 유저가 흥미를 느낄 수 있도록 할 것
-            11. "동글" 이라는 단어는 트리거이므로 대화에서 무시할 것
-            12. 응답 시작에 "{selected_character}:" 외의 다른 형식 사용하지 말 것
-            """
-            
-            logger.info(f"선택된 캐릭터: {selected_character}")
+            # 추가 지시사항 확인
+            instruction = "최근 대화 내용을 간결하게 요약해주세요."
+            if additional_instruction:
+                instruction = f"{additional_instruction}. {instruction}"
             
             messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"최근 대화 내역:\n{history_text}\n\n현재 메시지: {context}"}
+                {"role": "system", "content": "당신은 Discord 대화를 요약해주는 도우미입니다. 다음 지시사항에 따라 최근 대화를 요약해주세요."},
+                {"role": "user", "content": f"다음은 Discord 채널의 최근 대화 내용입니다:\n\n{history_text}\n\n{instruction}"}
             ]
             
             response = self.client.chat.completions.create(
                 model="deepseek-chat",
                 messages=messages,
                 max_tokens=self.DEFAULT_MAX_TOKENS,
-                temperature=1.0, 
+                temperature=1.0,
                 stream=False
             )
             
@@ -536,17 +344,17 @@ class NonsenseChatbot(commands.Cog):
                 content = content[:self.MAX_DISCORD_LENGTH] + "..."
                 logger.info(f"응답이 너무 길어 {self.MAX_DISCORD_LENGTH}자로 잘렸습니다.")
             
-            logger.info(f"헛소리 응답 생성 완료: {len(content)}자")
+            logger.info(f"요약 생성 완료: {len(content)}자")
             return content
             
         except Exception as e:
-            logger.error(f"헛소리 생성 중 오류 발생: {e}")
+            logger.error(f"요약 생성 중 오류 발생: {e}")
             logger.error(traceback.format_exc())
-            return "헛소리 생성 회로가 과부하됐어요... 잠시 후 다시 시도해주세요."
+            return "요약 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
 
 async def setup(bot):
     """
-    봇에 NonsenseChatbot 코그를 추가합니다.
+    봇에 SummaryAssistant 코그를 추가합니다.
     """
-    await bot.add_cog(NonsenseChatbot(bot))
-    logger.info("NonsenseChatbot 코그가 로드되었습니다.")
+    await bot.add_cog(SummaryAssistant(bot))
+    logger.info("SummaryAssistant 코그가 로드되었습니다.")
