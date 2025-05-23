@@ -149,12 +149,9 @@ class SummaryAssistant(commands.Cog):
                     await interaction.followup.send("요약할 메시지가 충분하지 않습니다. 더 많은 대화가 필요합니다.", ephemeral=True)
                 return
             
-            # 사용자가 입력한 추가 지시사항이 있는 경우 추가
-            if 추가_지시사항:
-                additional_instruction = f"{additional_instruction}\n{추가_지시사항}"
             
             # 요약 생성
-            summary = await self.generate_summary(messages_to_summarize, additional_instruction)
+            summary = await self.generate_summary(messages_to_summarize)
             
             if not summary:
                 await interaction.followup.send("요약을 생성할 수 없습니다. 나중에 다시 시도해주세요.", ephemeral=True)
