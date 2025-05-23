@@ -140,13 +140,13 @@ class SummaryAssistant(commands.Cog):
                 
             # 임베드 생성
             embed = discord.Embed(
-                title=f"💬 {summary_type}{limit}개 메시지 요약 ",
+                # title=f"💬 {summary_type}{limit}개 메시지 요약 ",
                 description=f"> {summary}",
                 color=0x242429
             )
             
             # 현재 시간 추가
-            embed.set_footer(text=f"{datetime.now().strftime('%Y-%m-%d %H:%M')}")
+            embed.set_footer(text=f"{datetime.now().strftime('%Y-%m-%d %H:%M')} | {summary_type}{limit}개 메시지 요약")
             
             # 전송 방식에 따라 요약 전송
             if is_private_mode:  # 개인 메시지로 전송
@@ -364,13 +364,13 @@ class SummaryAssistant(commands.Cog):
             history_text = "\n".join(history) if history else "대화 내역 없음"
             
             # 추가 지시사항 확인
-            instruction = "최근 대화 내용을 간결하지만 핵심적인 내용을 놓치지 않고 요약해주세요. 한국어로 응답해주세요."
+            instruction = "Please summarize recent conversations that are concise but do not miss the core. Please respond in the language you used in the conversation."
             if additional_instruction:
                 instruction = f"{additional_instruction}. {instruction}"
             
             messages = [
-                {"role": "system", "content": "당신은 Discord 대화를 요약해주는 도우미입니다. 다음 지시사항에 따라 최근 대화를 요약해주세요. 대답 양식은 항상 맨 앞에 [대화 요약]으로 시작해야 합니다."},
-                {"role": "user", "content": f"다음은 Discord 채널의 최근 대화 내용입니다:\n\n{history_text}\n\n{instruction}"}
+                {"role": "system", "content": "You are a Discord conversation summary assistant. Please summarize the recent conversation concisely but do not miss the core. Please respond in the language you used in the conversation."},
+                {"role": "user", "content": f"Here is the recent conversation content of Discord channel:\n\n{history_text}\n\n{instruction}"}
             ]
             
             response = self.client.chat.completions.create(
