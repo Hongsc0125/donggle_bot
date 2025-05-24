@@ -98,8 +98,12 @@ class SummaryAssistant(commands.Cog):
     async def summarize(self, interaction: discord.Interaction, 
                        전송방식: typing.Literal["공개", "개인"],
                        메시지개수: typing.Literal["50", "100", "300", "500"] = "50"):
-        # 명령어 응답 지연 (서버에서 처리하는 데 시간이 걸릴 수 있으므로)
-        await interaction.response.defer(ephemeral=True)
+
+        is_private_mode = 전송방식 == "개인"
+        if is_private_mode:
+            await interaction.response.defer(ephemeral=True)
+        else:
+            await interaction.response.defer(ephemeral=False)
         
         # 채널 ID 확인
         channel_id = str(interaction.channel_id)
@@ -112,7 +116,6 @@ class SummaryAssistant(commands.Cog):
             logger.info(f"요약 명령어 실행: 채널={channel_id}, 사용자={user_id}, 전송방식={전송방식}")
             # 요약할 메시지 가져오기
             messages_to_summarize = []
-            is_private_mode = 전송방식 == "개인"
             
             # 메시지 개수 정수로 변환
             limit = int(메시지개수)
@@ -150,7 +153,7 @@ class SummaryAssistant(commands.Cog):
             
             # 전송 방식에 따라 요약 전송
             if is_private_mode:  # 개인 메시지로 전송 (ephemeral 메시지 사용)
-                await interaction.followup.send(embed=embed, ephemeral=True)
+                await interaction.followup.send(embed=embed)
                 logger.info(f"ephemeral 임베드 요약 전송 완료 (사용자: {interaction.user.name}, 유형: {summary_type}, 길이: {len(summary)}자)")
             else:  # 채널에 공개적으로 전송
                 await interaction.followup.send(embed=embed)
