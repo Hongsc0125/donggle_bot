@@ -97,7 +97,7 @@ class SummaryAssistant(commands.Cog):
     )
     async def summarize(self, interaction: discord.Interaction, 
                        전송방식: typing.Literal["공개", "개인"],
-                       메시지개수: typing.Literal["50", "100", "300", "500"] = "100"):
+                       메시지개수: typing.Literal["50", "100", "300", "500"] = "50"):
         # 명령어 응답 지연 (서버에서 처리하는 데 시간이 걸릴 수 있으므로)
         await interaction.response.defer(ephemeral=True)
         
@@ -149,22 +149,11 @@ class SummaryAssistant(commands.Cog):
             embed.set_footer(text=f"{datetime.now().strftime('%Y-%m-%d %H:%M')} | {summary_type}{limit}개 메시지 요약")
             
             # 전송 방식에 따라 요약 전송
-            if is_private_mode:  # 개인 메시지로 전송
-                try:
-                    # 개인 메시지로 임베드 전송
-                    await interaction.user.send(embed=embed)
-                    
-                    # 요청한 채널에는 성공 메시지만 전송
-                    await interaction.followup.send(f"{summary_type} 요약을 개인에게만 보이도록 전송했습니다.", ephemeral=True)
-                    
-                    logger.info(f"개인 임베드 요약 전송 완료 (사용자: {interaction.user.name}, 유형: {summary_type}, 길이: {len(summary)}자)")
-                except Exception as e:
-                    logger.error(f"개인 요약 전송 실패: {e}")
-                    await interaction.followup.send("개인 메시지 전송 중 오류가 발생했습니다", ephemeral=True)
+            if is_private_mode:  # 개인 메시지로 전송 (ephemeral 메시지 사용)
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                logger.info(f"ephemeral 임베드 요약 전송 완료 (사용자: {interaction.user.name}, 유형: {summary_type}, 길이: {len(summary)}자)")
             else:  # 채널에 공개적으로 전송
-                # 임베드로 공개 전송
-                await interaction.channel.send(embed=embed)
-                await interaction.followup.send("요약이 전송되었습니다.", ephemeral=True)
+                await interaction.followup.send(embed=embed)
                 logger.info(f"임베드 요약 전송 완료 (채널: {interaction.channel.name}, 유형: {summary_type}, 길이: {len(summary)}자)")
         
         except Exception as e:
@@ -364,13 +353,26 @@ class SummaryAssistant(commands.Cog):
             history_text = "\n".join(history) if history else "대화 내역 없음"
             
             # 추가 지시사항 확인
-            instruction = "Please summarize recent conversations that are concise but do not miss the core. Please respond in the language you used in the conversation."
+            instruction = """Please summarize recent conversations that are concise but do not miss the core. 
+            format them according to the topic of conversation(Organize them by topic and format them to look good).
+            Heather '요약(in the language to respond): \n'Start with '  and take advantage of Discord markdown to keep pretty formatting.
+            Please respond in the language you used in the conversation.
+            """
             if additional_instruction:
                 instruction = f"{additional_instruction}. {instruction}"
             
             messages = [
-                {"role": "system", "content": "You are a Discord conversation summary assistant. Please summarize the recent conversation concisely but do not miss the core. Please respond in the language you used in the conversation."},
-                {"role": "user", "content": f"Here is the recent conversation content of Discord channel:\n\n{history_text}\n\n{instruction}"}
+                {
+                    "role": "system", 
+                    "content": """
+                    Discord Conversation Summary Helper. Briefly summarize recent conversations, but don't miss the point. 
+                    It doesn't include anything other than a summary (298 characters) (briefly put to the core!) and **never put the bot's language**.
+                    """                
+                },
+                {
+                    "role": "user", 
+                    "content": f"Here is the recent conversation content of Discord channel:\n\n{history_text}\n\n{instruction}"
+                }
             ]
             
             response = self.client.chat.completions.create(
