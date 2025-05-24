@@ -144,7 +144,7 @@ class SummaryAssistant(commands.Cog):
             # 임베드 생성
             embed = discord.Embed(
                 # title=f"💬 {summary_type}{limit}개 메시지 요약 ",
-                description=f"> {summary}",
+                description=f"> 요약 : \n {summary}",
                 color=0x242429
             )
             
