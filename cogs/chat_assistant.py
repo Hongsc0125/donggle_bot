@@ -356,10 +356,12 @@ class SummaryAssistant(commands.Cog):
             history_text = "\n".join(history) if history else "대화 내역 없음"
             
             # 추가 지시사항 확인
-            instruction = """Please summarize recent conversations that are concise but do not miss the core. 
-            format them according to the topic of conversation(Organize them by topic and format them to look good).
-            Heather '요약(in the language to respond): \n'Start with '  and take advantage of Discord markdown to keep pretty formatting.
-            Please respond in the language you used in the conversation.
+            instruction = """
+            최근 Discord 채널 대화를 주제별로 분류해서 요약해 주세요. 각 주제는 다음과 같은 형식으로 작성해야 합니다:
+            - [주제1]\n[내용1]\n- [주제2]\n[내용2]\n...
+            주제가 많아지면 항목을 더 추가해 주세요.
+            마지막에는 반드시 '- 분위기' 항목을 추가해서 대화의 분위기나 흐름을 간단히 한 줄로 요약해 주세요.
+            모든 항목은 Discord 마크다운에 잘 어울리게, 보기 좋고 간결하게 작성해 주세요. 반드시 한국어로 응답하세요.
             """
             if additional_instruction:
                 instruction = f"{additional_instruction}. {instruction}"
