@@ -7,7 +7,7 @@ from core.utils import interaction_response, interaction_followup
 from queries.recruitment_query import select_dungeon, select_pair_channel_id, select_dungeon_id, insert_recruitment, select_recruitment
 from queries.recruitment_query import update_recruitment_message_id, select_max_person_setting
 
-from views.recruitment_views.list_templete import build_recruitment_embed, RecruitmentListButtonView
+from views.recruitment_views.list_templete import build_recruitment_embed, RecruitmentListButtonView, get_member_names
 
 logger = logging.getLogger(__name__)
 
@@ -344,13 +344,13 @@ class ConfirmationView(discord.ui.View):
                 db.rollback()
                 return
 
-            if regist_data['dungeon_type'] == '레이드' or regist_data['dungeon_type'] == '심층' or regist_data['dungeon_type'] == '퀘스트':
+            if regist_data['dungeon_type'] == '심층' or regist_data['dungeon_type'] == '퀘스트':
                 image_url = f"https://harmari.duckdns.org/static/{regist_data['dungeon_type']}.png"
-            elif regist_data['dungeon_type'] == '어비스':
+            elif regist_data['dungeon_type'] == '어비스' or regist_data['dungeon_type'] == '레이드' :
                 image_url = f"https://harmari.duckdns.org/static/{regist_data['dungeon_name']}.png"
             else:
                 image_url = f"https://harmari.duckdns.org/static/마비로고.png"
-
+                
 
             channel = interaction.guild.get_channel(int(regist_data['list_ch_id']))
             if channel is None:
@@ -359,6 +359,13 @@ class ConfirmationView(discord.ui.View):
                 return
             
             db.commit()
+
+            # 파티장 닉네임 가져오기 (새 공고이므로 지원자는 없음)
+            recruiter_name, _ = await get_member_names(
+                interaction.guild, 
+                regist_data['create_user_id'], 
+                []
+            )
 
             # 공고 등록
             embed = build_recruitment_embed(
@@ -372,7 +379,9 @@ class ConfirmationView(discord.ui.View):
                 applicants=[],
                 image_url=image_url,
                 recru_id=recru_id,
-                create_dt=regist_data['create_dt']
+                create_dt=regist_data['create_dt'],
+                recruiter_name=recruiter_name,
+                applicant_names=[]
             )
             msg = await channel.send(embed=embed, view=RecruitmentListButtonView(recru_id=recru_id))
             message_id = msg.id

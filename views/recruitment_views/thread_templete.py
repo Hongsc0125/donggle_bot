@@ -20,9 +20,9 @@ def build_thread_embed(
         recru_id: str,
 ):
     
-    if dungeon_type in ['레이드', '심층', '퀘스트']:
+    if dungeon_type in ['심층', '퀘스트']:
         image_url = f"https://harmari.duckdns.org/static/{dungeon_type}.png"
-    elif dungeon_type == '어비스':
+    elif dungeon_type in ['어비스', '레이드']:
         image_url = f"https://harmari.duckdns.org/static/{dungeon_name}.png"
     else:
         image_url = "https://harmari.duckdns.org/static/마비로고.png"
