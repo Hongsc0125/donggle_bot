@@ -46,6 +46,9 @@ def _clone_select(select: discord.ui.Select, *, placeholder: str, disabled: bool
 # 메인 버튼 뷰
 # ──────────────────────────────
 class RecruitmentButtonView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)  # 시간 제한 없는 영구 버튼
+    
     @discord.ui.button(label="파티 모집 등록",
                        style=discord.ButtonStyle.primary,
                        custom_id="recruitment_register")

@@ -69,6 +69,17 @@ class Donggle(commands.Bot):
             except Exception as e:
                 logger.error(f"Failed to load extension {ext}: {e}")
         
+        # 영구 뷰 등록 (custom_id를 통한 버튼 지속성 보장)
+        try:
+            from views.recruitment_views.regist_templete import RecruitmentButtonView
+            from cogs.alert import AlertRegisterButton
+            
+            self.add_view(RecruitmentButtonView())
+            self.add_view(AlertRegisterButton())
+            logger.info("영구 뷰 등록 완료 (RecruitmentButtonView, AlertRegisterButton)")
+        except Exception as e:
+            logger.error(f"영구 뷰 등록 실패: {e}")
+        
         # 봇이 준비되면 자동으로 명령어 동기화
         try:
             # 전역 명령어 동기화 실패 시 개별 길드 동기화로 폴백
