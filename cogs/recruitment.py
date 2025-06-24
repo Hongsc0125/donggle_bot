@@ -9,7 +9,7 @@ from db.session import SessionLocal
 from core.utils import interaction_response, interaction_followup
 from queries.recruitment_query import select_recruitment_channel, select_recruitment, select_participants, select_active_recruitments, update_recruitment_message_id, select_list_channels, select_dungeon, select_max_person_setting
 from views.recruitment_views.regist_templete import RecruitmentButtonView, RecruitmentFormView, _start_embed
-from views.recruitment_views.list_templete import build_recruitment_embed, RecruitmentListButtonView
+from views.recruitment_views.list_templete import build_recruitment_embed, RecruitmentListButtonView, get_member_names
 
 logger = logging.getLogger(__name__)
 DungeonRow = Tuple[str, str, str]
@@ -182,6 +182,13 @@ class RecruitmentCog(commands.Cog):
             # 참가자 목록 조회
             participants = select_participants(db, recru_id)
             
+            # 닉네임 정보 수집
+            recruiter_name, applicant_names = await get_member_names(
+                channel.guild, 
+                recruitment['create_user_id'], 
+                participants
+            )
+            
             # 이미지 URL 설정
             if recruitment['dungeon_type'] in ['심층', '퀘스트']:
                 image_url = f"https://harmari.duckdns.org/static/{recruitment['dungeon_type']}.png"
@@ -202,7 +209,9 @@ class RecruitmentCog(commands.Cog):
                 applicants=participants,
                 image_url=image_url,
                 recru_id=recru_id,
-                create_dt=recruitment['create_dt']
+                create_dt=recruitment['create_dt'],
+                recruiter_name=recruiter_name,
+                applicant_names=applicant_names
             )
             
             # 버튼 뷰 생성 - 상태에 따라 버튼 표시 여부 결정

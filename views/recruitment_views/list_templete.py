@@ -13,6 +13,31 @@ from views.recruitment_views.thread_templete import create_thread
 SEPARATOR = "─" * 25
 logger = logging.getLogger(__name__)
 
+async def get_member_names(guild, recruiter_id: str, participant_ids: list[str]):
+    """멤버 ID들을 닉네임으로 변환하는 헬퍼 함수"""
+    recruiter_name = None
+    applicant_names = []
+    
+    try:
+        # 파티장 닉네임 가져오기
+        recruiter_member = await guild.fetch_member(int(recruiter_id))
+        if recruiter_member:
+            recruiter_name = recruiter_member.display_name
+    except Exception as e:
+        logger.warning(f"파티장 {recruiter_id} 정보 조회 실패: {e}")
+    
+    # 지원자 닉네임들 가져오기
+    for participant_id in participant_ids:
+        try:
+            participant_member = await guild.fetch_member(int(participant_id))
+            if participant_member:
+                applicant_names.append(participant_member.display_name)
+        except Exception as e:
+            logger.warning(f"참가자 {participant_id} 정보 조회 실패: {e}")
+            applicant_names.append(f"Unknown({participant_id})")
+    
+    return recruiter_name, applicant_names
+
 # ───────────────────────────────────────────────
 #              파티모집공고 임베드
 # ───────────────────────────────────────────────
@@ -28,6 +53,8 @@ def build_recruitment_embed(
     image_url: str,
     recru_id: str,
     create_dt: str,
+    recruiter_name: str = None,
+    applicant_names: list[str] = None,
 ) -> discord.Embed:
 
     # 날짜형식 포메팅 YY-MM-DD HH:MM
@@ -49,11 +76,16 @@ def build_recruitment_embed(
     embed.add_field(name="", value=SEPARATOR, inline=False)
 
     # ── 지원자 & 파티장 목록 ───────────────────────────
-    joined = "\n".join(f"• <@{uid}>" for uid in applicants) if applicants else "_아직 없음_"
+    if applicant_names:
+        joined = "\n".join(f"• {name}" for name in applicant_names) if applicant_names else "_아직 없음_"
+    else:
+        joined = "\n".join(f"• <@{uid}>" for uid in applicants) if applicants else "_아직 없음_"
+
+    recruiter_display = recruiter_name if recruiter_name else f"<@{recruiter}>"
 
     embed.add_field(
         name="👑 **파티장**\n\n",
-        value=f"<@{recruiter}>",
+        value=recruiter_display,
         inline=True
     )
 
@@ -167,6 +199,13 @@ class RecruitmentListButtonView(discord.ui.View):
 
             # 재조회(최신화)
             recruitment_result = select_recruitment(db, recru_id)
+            
+            # 닉네임 정보 가져오기
+            recruiter_name, applicant_names = await get_member_names(
+                interaction.guild, 
+                recruitment_result["create_user_id"], 
+                participants_list
+            )
 
             embed = build_recruitment_embed(
                 recruitment_result["dungeon_type"],
@@ -179,7 +218,9 @@ class RecruitmentListButtonView(discord.ui.View):
                 participants_list,
                 interaction.message.embeds[0].thumbnail.url,
                 self.recru_id,
-                recruitment_result["create_dt"]
+                recruitment_result["create_dt"],
+                recruiter_name,
+                applicant_names
             )
 
             # 버튼제거 검사 및 제거
@@ -237,6 +278,13 @@ class RecruitmentListButtonView(discord.ui.View):
             # 재조회(최신화)
             recruitment_result = select_recruitment(db, recru_id)
             participants_list = select_participants(db, recru_id)
+            
+            # 닉네임 정보 가져오기
+            recruiter_name, applicant_names = await get_member_names(
+                interaction.guild, 
+                recruitment_result["create_user_id"], 
+                participants_list
+            )
 
             embed = build_recruitment_embed(
                 recruitment_result["dungeon_type"],
@@ -249,7 +297,9 @@ class RecruitmentListButtonView(discord.ui.View):
                 participants_list,
                 interaction.message.embeds[0].thumbnail.url,
                 self.recru_id,
-                recruitment_result["create_dt"]
+                recruitment_result["create_dt"],
+                recruiter_name,
+                applicant_names
             )
 
             await interaction.response.edit_message(embed=embed, view=self)
@@ -302,6 +352,13 @@ class RecruitmentListButtonView(discord.ui.View):
 
             # 버튼 제거 및 임베드 재생성
             self.remove_all_buttons(recruitment_result["status_code"])
+            
+            # 닉네임 정보 가져오기
+            recruiter_name, applicant_names = await get_member_names(
+                interaction.guild, 
+                recruitment_result["create_user_id"], 
+                participants_list
+            )
 
             embed = build_recruitment_embed(
                 recruitment_result["dungeon_type"],
@@ -314,7 +371,9 @@ class RecruitmentListButtonView(discord.ui.View):
                 participants_list,
                 interaction.message.embeds[0].thumbnail.url,
                 self.recru_id,
-                recruitment_result["create_dt"]
+                recruitment_result["create_dt"],
+                recruiter_name,
+                applicant_names
             )
 
             await interaction.response.edit_message(embed=embed, view=self)
@@ -369,6 +428,13 @@ class RecruitmentListButtonView(discord.ui.View):
 
             # 임베드 재생성
             self.remove_all_buttons(recruitment_result["status_code"])
+            
+            # 닉네임 정보 가져오기
+            recruiter_name, applicant_names = await get_member_names(
+                interaction.guild, 
+                recruitment_result["create_user_id"], 
+                participants_list
+            )
 
             embed = build_recruitment_embed(
                 recruitment_result["dungeon_type"],
@@ -381,7 +447,9 @@ class RecruitmentListButtonView(discord.ui.View):
                 participants_list,
                 interaction.message.embeds[0].thumbnail.url,
                 self.recru_id,
-                recruitment_result["create_dt"]
+                recruitment_result["create_dt"],
+                recruiter_name,
+                applicant_names
             )
 
             await interaction.response.edit_message(embed=embed, view=self)
