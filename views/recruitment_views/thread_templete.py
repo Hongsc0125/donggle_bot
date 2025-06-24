@@ -201,9 +201,14 @@ async def create_thread(interaction: discord.Interaction, time:int = 10080):
             
             creater_name = search_member.display_name
 
-            channel = interaction.guild.get_channel(int(recruitment_result["parents_thread_ch_id"]))
-            if channel is None:
+            parents_thread_ch_id = recruitment_result["parents_thread_ch_id"]
+            if parents_thread_ch_id is None:
                 await interaction_followup(interaction, "❌ 스레드 채널이 설정되지 않았습니다.")
+                return
+                
+            channel = interaction.guild.get_channel(int(parents_thread_ch_id))
+            if channel is None:
+                await interaction_followup(interaction, "❌ 스레드 채널을 찾을 수 없습니다.")
                 return
 
             try:
