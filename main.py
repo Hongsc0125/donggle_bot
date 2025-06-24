@@ -92,6 +92,10 @@ class Donggle(commands.Bot):
         recruitment_cog = self.get_cog("RecruitmentCog")
         if recruitment_cog:
             await recruitment_cog.on_ready()
+        
+        alert_cog = self.get_cog("AlertCog")
+        if alert_cog:
+            await alert_cog.on_ready()
 
     @tasks.loop(seconds=30)
     async def connection_monitor(self):
@@ -145,6 +149,10 @@ class Donggle(commands.Bot):
             
             logger.info("디스코드 재연결 성공")
             self.last_heartbeat = datetime.now()
+            
+            # 재연결 후 잠시 대기 후 채널 상태 새로고침
+            await asyncio.sleep(3)
+            await self.refresh_all_channels()
         except Exception as e:
             logger.error(f"재연결 시도 중 오류 발생: {e}")
 
@@ -152,6 +160,9 @@ class Donggle(commands.Bot):
         """세션이 재개되었을 때 호출되는 이벤트"""
         logger.info("디스코드 세션이 재개되었습니다.")
         self.last_heartbeat = datetime.now()
+        
+        # 세션 재개시 버튼 상태 재초기화
+        await self.refresh_all_channels()
 
     async def on_connect(self):
         """봇이 디스코드에 연결되었을 때 호출되는 이벤트"""
@@ -161,6 +172,21 @@ class Donggle(commands.Bot):
     async def on_disconnect(self):
         """봇이 디스코드와 연결이 끊겼을 때 호출되는 이벤트"""
         logger.warning("디스코드와 연결이 끊겼습니다. 자동 재연결을 시도합니다.")
+
+    async def refresh_all_channels(self):
+        """모든 채널의 버튼 상태를 새로고침"""
+        try:
+            recruitment_cog = self.get_cog("RecruitmentCog")
+            if recruitment_cog:
+                await recruitment_cog.on_ready()
+            
+            alert_cog = self.get_cog("AlertCog")
+            if alert_cog:
+                await alert_cog.on_ready()
+                
+            logger.info("모든 채널 버튼 상태 새로고침 완료")
+        except Exception as e:
+            logger.error(f"채널 버튼 새로고침 중 오류: {e}")
 
 
 async def main():
