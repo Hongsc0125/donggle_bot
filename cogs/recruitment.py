@@ -183,9 +183,9 @@ class RecruitmentCog(commands.Cog):
             participants = select_participants(db, recru_id)
             
             # 이미지 URL 설정
-            if recruitment['dungeon_type'] in ['레이드', '심층', '퀘스트']:
+            if recruitment['dungeon_type'] in ['심층', '퀘스트']:
                 image_url = f"https://harmari.duckdns.org/static/{recruitment['dungeon_type']}.png"
-            elif recruitment['dungeon_type'] == '어비스':
+            elif recruitment['dungeon_type'] in ['레이드', '어비스']:
                 image_url = f"https://harmari.duckdns.org/static/{recruitment['dungeon_name']}.png"
             else:
                 image_url = "https://harmari.duckdns.org/static/마비로고.png"
