@@ -645,13 +645,16 @@ class AlertCog(commands.Cog):
                 await last_message.edit(embed=instruction_embed, view=view)
                 logger.info(f"알림 채널 {channel_id} 기존 버튼 메시지 업데이트 완료")
             except Exception as e:
-                logger.warning(f"알림 채널 {channel_id} 버튼 갱신 실패: {str(e)}")
+                logger.error(f"알림 채널 {channel_id} 버튼 갱신 실패: {str(e)}")
+                logger.error(traceback.format_exc())
         else:
+            logger.info(f"알림 채널 {channel_id}에 기존 메시지가 없습니다. 새 메시지를 생성합니다.")
             try:
-                await channel.send(embed=instruction_embed, view=view)
-                logger.info(f"알림 채널 {channel_id} 새 버튼 메시지 생성 완료")
+                new_msg = await channel.send(embed=instruction_embed, view=view)
+                logger.info(f"알림 채널 {channel_id} 새 버튼 메시지 생성 완료 (메시지 ID: {new_msg.id})")
             except Exception as e:
-                logger.warning(f"알림 채널 {channel_id}에 버튼 메시지 전송 실패: {str(e)}")
+                logger.error(f"알림 채널 {channel_id}에 버튼 메시지 전송 실패: {str(e)}")
+                logger.error(traceback.format_exc())
     
     async def show_alert_settings(self, interaction: discord.Interaction):
         """알림 설정 UI를 표시"""

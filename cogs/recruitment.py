@@ -178,11 +178,8 @@ class RecruitmentCog(commands.Cog):
                 logger.warning(f"공고 {recru_id}의 메시지 ID가 없습니다.")
                 continue
 
-            keep_message_ids.add(int(message_id))
-
-            # 일주일 경과 여부 확인
+            # 일주일 경과 여부 확인 - 일주일 지난 공고는 아예 건너뜀
             create_dt = recruitment['create_dt']
-            is_expired = False
             if create_dt:
                 # create_dt가 문자열인 경우 datetime으로 변환
                 if isinstance(create_dt, str):
@@ -190,25 +187,12 @@ class RecruitmentCog(commands.Cog):
 
                 # 현재 시간과 비교 (일주일 = 7일)
                 time_diff = datetime.now() - create_dt
-                is_expired = time_diff > timedelta(days=7)
+                if time_diff > timedelta(days=7):
+                    logger.info(f"공고 {recru_id}는 일주일이 지나 업데이트를 건너뜁니다.")
+                    continue
 
-            # 일주일이 지난 경우 버튼만 비활성화하고 업데이트 생략
-            if is_expired:
-                logger.info(f"공고 {recru_id}는 일주일이 지나 버튼만 비활성화합니다.")
-                try:
-                    message = await channel.fetch_message(int(message_id))
-                    # 기존 임베드 유지, 버튼만 비활성화
-                    view = RecruitmentListButtonView(recru_id=recru_id)
-                    view.disable_all_buttons()
-                    await message.edit(view=view)
-                    logger.info(f"공고 {recru_id} 버튼 비활성화 완료")
-                except discord.NotFound:
-                    logger.warning(f"메시지 {message_id}를 찾을 수 없습니다.")
-                except Exception as e:
-                    logger.error(f"공고 {recru_id} 버튼 비활성화 중 오류: {str(e)}")
-                continue
+            keep_message_ids.add(int(message_id))
 
-            # 일주일 이내인 경우만 정상 업데이트
             # 참가자 목록 조회
             participants = select_participants(db, recru_id)
 
