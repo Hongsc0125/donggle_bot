@@ -751,7 +751,7 @@ class AlertCog(commands.Cog):
                     time_display = f"{alert['alert_time'].strftime('%H:%M')} ({interval_display})"
 
                 delete_btn.label = f"삭제: {time_display}"
-                delete_btn.row = 4 + (i // 5)  # 한 줄에 다섯 개씩 배치
+                delete_btn.row = 5 + (i // 5)  # row 5부터 시작, 한 줄에 다섯 개씩 배치
                 view.add_item(delete_btn)
             
             # 메시지 전송 (적절한 메서드 사용)
