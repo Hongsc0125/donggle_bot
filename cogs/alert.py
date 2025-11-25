@@ -89,37 +89,21 @@ class AlertView(discord.ui.View):
         super().__init__(timeout=300)  # 5분 타임아웃
         self.user_id = user_id
         
-        # 커스텀 알림 개수 확인 (추가)
-        with SessionLocal() as db:
-            user_alerts = get_user_alerts(db, user_id)
-            custom_alerts = [a for a in user_alerts if a['alert_type'] == 'custom' or a['alert_type'].startswith('custom_')]
-            custom_alert_count = len(custom_alerts)
-            
-            # 심층 알림 활성화 여부 확인
-            guild_id = None
-            if bot:
-                for guild in bot.guilds:
-                    member = guild.get_member(int(user_id))
-                    if member:
-                        guild_id = guild.id
-                        break
-        
         # 각 컴포넌트를 특정 행에 배치
         boss_select = AlertSelect('boss', '보스 알림 🔔', user_id)
         boss_select.row = 0  # 첫 번째 행
         self.add_item(boss_select)
-        
+
         barrier_select = AlertSelect('barrier', '결계 알림 🛡️', user_id)
         barrier_select.row = 1  # 두 번째 행
         self.add_item(barrier_select)
-        
+
         day_select = DaySelect(user_id)
         day_select.row = 2  # 세 번째 행
         self.add_item(day_select)
-        
-        # 커스텀 알림 버튼 - 2개 제한 로직 적용
+
+        # 커스텀 알림 버튼 - 무제한 추가 가능
         custom_btn = CustomAlertButton()
-        custom_btn.disabled = custom_alert_count >= 2  # 2개 이상이면 버튼 비활성화
         custom_btn.row = 3  # 네 번째 행
         self.add_item(custom_btn)
         
@@ -339,16 +323,7 @@ class CustomAlertModal(discord.ui.Modal, title="커스텀 알림 등록"):
     
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        
-        # 사용자가 이미 등록한 커스텀 알림 개수 확인
-        with SessionLocal() as db:
-            user_alerts = get_user_alerts(db, interaction.user.id)
-            custom_alerts = [a for a in user_alerts if a['alert_type'] == 'custom' or a['alert_type'].startswith('custom_')]
-            
-            if len(custom_alerts) >= 2:
-                await interaction_followup(interaction, "❌ 커스텀 알림은 최대 2개까지만 등록할 수 있습니다.")
-                return
-        
+
         # 시간 형식 검증
         time_pattern = re.compile(r'^([0-1][0-9]|2[0-3]):([0-5][0-9])$')
         if not time_pattern.match(self.alert_time.value):
@@ -741,10 +716,10 @@ class AlertCog(commands.Cog):
                         interval_display = "매일" if a['interval'] == "day" else "매주"
                         custom_times.append(f"{time_str} ({interval_display})")
                 
-                # 커스텀 알림 정보 표시 (제한 표시 추가)
+                # 커스텀 알림 정보 표시
                 embed.add_field(
                     name="➕ 커스텀 알림",
-                    value=", ".join(custom_times) + f"\n\n아래 버튼으로 커스텀 알림을 관리할 수 있습니다.\n(최대 2개까지 등록 가능, 현재 {len(custom_alerts)}/2개)",
+                    value=", ".join(custom_times) + f"\n\n아래 버튼으로 커스텀 알림을 관리할 수 있습니다.\n(현재 {len(custom_alerts)}개 등록됨)",
                     inline=False
                 )
             
@@ -774,9 +749,9 @@ class AlertCog(commands.Cog):
                 else:
                     interval_display = "매일" if alert['interval'] == "day" else "매주"
                     time_display = f"{alert['alert_time'].strftime('%H:%M')} ({interval_display})"
-                    
+
                 delete_btn.label = f"삭제: {time_display}"
-                delete_btn.row = 4 + (i // 2)  # 한 줄에 두 개씩 배치
+                delete_btn.row = 4 + (i // 5)  # 한 줄에 다섯 개씩 배치
                 view.add_item(delete_btn)
             
             # 메시지 전송 (적절한 메서드 사용)
