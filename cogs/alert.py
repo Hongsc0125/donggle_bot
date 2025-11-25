@@ -324,6 +324,15 @@ class CustomAlertModal(discord.ui.Modal, title="커스텀 알림 등록"):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
 
+        # 사용자가 이미 등록한 커스텀 알림 개수 확인 (최대 25개)
+        with SessionLocal() as db:
+            user_alerts = get_user_alerts(db, interaction.user.id)
+            custom_alerts = [a for a in user_alerts if a['alert_type'] == 'custom' or a['alert_type'].startswith('custom_')]
+
+            if len(custom_alerts) >= 25:
+                await interaction_followup(interaction, "❌ 커스텀 알림은 최대 25개까지만 등록할 수 있습니다.")
+                return
+
         # 시간 형식 검증
         time_pattern = re.compile(r'^([0-1][0-9]|2[0-3]):([0-5][0-9])$')
         if not time_pattern.match(self.alert_time.value):
@@ -435,31 +444,48 @@ class CustomAlertDeleteButton(discord.ui.Button):
                 await interaction_followup(interaction, "❌ 알림 삭제 중 오류가 발생했습니다.")
                 db.rollback()
 
-class CustomAlertView(discord.ui.View):
-    def __init__(self, custom_alerts, parent_cog):
-        super().__init__(timeout=180)
-        self.parent_cog = parent_cog
-        
+class CustomAlertManageView(discord.ui.View):
+    """커스텀 알림 관리 전용 뷰 - 최대 25개(5 rows × 5 buttons) 삭제 버튼 표시"""
+    def __init__(self, custom_alerts):
+        super().__init__(timeout=300)
+
         if not custom_alerts:
-            # 커스텀 알림이 없는 경우 안내 메시지만 표시
             return
-        
-        # 각 커스텀 알림에 대한 삭제 버튼 추가
-        for i, alert in enumerate(custom_alerts):
+
+        # 각 커스텀 알림에 대한 삭제 버튼 추가 (최대 25개)
+        for i, alert in enumerate(custom_alerts[:25]):  # 최대 25개까지만
             delete_btn = CustomAlertDeleteButton(alert['alert_id'])
-            delete_btn.row = i // 2  # 한 줄에 2개씩 표시
+
+            # 알림 정보 표시
+            if alert['alert_type'].startswith('custom_'):
+                day_code = alert['alert_type'][7:]
+                day_name = ALERT_TYPE_NAMES.get(day_code, day_code)
+                time_display = f"{alert['alert_time'].strftime('%H:%M')} (매주 {day_name})"
+            else:
+                interval_display = "매일" if alert['interval'] == "day" else "매주"
+                time_display = f"{alert['alert_time'].strftime('%H:%M')} ({interval_display})"
+
+            delete_btn.label = f"삭제: {time_display}"
+            delete_btn.row = i // 5  # 한 줄에 5개씩 배치 (row 0-4)
             self.add_item(delete_btn)
 
 class AlertRegisterButton(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)  # 시간 제한 없는 영구 버튼
-    
+
     @discord.ui.button(label="알림등록", style=discord.ButtonStyle.primary, custom_id="alert_register")
     async def register_alert(self, interaction: discord.Interaction, button: discord.ui.Button):
         """알림등록 버튼 처리"""
         alert_cog = interaction.client.get_cog("AlertCog")
         if (alert_cog):
             await alert_cog.show_alert_settings(interaction)
+
+    @discord.ui.button(label="커스텀 알림 보기", style=discord.ButtonStyle.secondary, custom_id="custom_alert_view")
+    async def view_custom_alerts(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """커스텀 알림 보기 버튼 처리"""
+        alert_cog = interaction.client.get_cog("AlertCog")
+        if (alert_cog):
+            await alert_cog.show_custom_alerts(interaction)
 
 # 심층 알림 토글 버튼 클래스 수정
 class DeepAlertToggleButton(discord.ui.Button):
@@ -715,11 +741,11 @@ class AlertCog(commands.Cog):
                     else:
                         interval_display = "매일" if a['interval'] == "day" else "매주"
                         custom_times.append(f"{time_str} ({interval_display})")
-                
+
                 # 커스텀 알림 정보 표시
                 embed.add_field(
                     name="➕ 커스텀 알림",
-                    value=", ".join(custom_times) + f"\n\n아래 버튼으로 커스텀 알림을 관리할 수 있습니다.\n(현재 {len(custom_alerts)}개 등록됨)",
+                    value=", ".join(custom_times) + f"\n\n'커스텀 알림 보기' 버튼으로 알림을 관리할 수 있습니다.\n(현재 {len(custom_alerts)}/25개 등록됨)",
                     inline=False
                 )
             
@@ -737,39 +763,7 @@ class AlertCog(commands.Cog):
             
             # 기본 알림 선택용 뷰 생성
             view = AlertView(interaction.user.id, self.bot)
-            
-            # 현재 view의 row별 아이템 개수 확인
-            row_3_count = sum(1 for item in view.children if hasattr(item, 'row') and item.row == 3)
-            row_4_count = sum(1 for item in view.children if hasattr(item, 'row') and item.row == 4)
 
-            # 커스텀 알림 삭제 버튼 추가
-            for i, alert in enumerate(custom_alerts):
-                delete_btn = CustomAlertDeleteButton(alert['alert_id'])
-                # 알림 정보 표시
-                if alert['alert_type'].startswith('custom_'):
-                    day_code = alert['alert_type'][7:]
-                    day_name = ALERT_TYPE_NAMES.get(day_code, day_code)
-                    time_display = f"{alert['alert_time'].strftime('%H:%M')} (매주 {day_name})"
-                else:
-                    interval_display = "매일" if alert['interval'] == "day" else "매주"
-                    time_display = f"{alert['alert_time'].strftime('%H:%M')} ({interval_display})"
-
-                delete_btn.label = f"삭제: {time_display}"
-
-                # row 3과 4의 남은 공간에 배치 (Discord는 row 0-4만 허용, 각 row 최대 5개)
-                if row_3_count < 5:
-                    delete_btn.row = 3
-                    row_3_count += 1
-                elif row_4_count < 5:
-                    delete_btn.row = 4
-                    row_4_count += 1
-                else:
-                    # 더 이상 공간 없음 - UI 제약으로 표시 불가
-                    logger.warning(f"커스텀 알림 삭제 버튼 표시 공간 부족: {i}번째부터 생략됨")
-                    break
-
-                view.add_item(delete_btn)
-            
             # 메시지 전송 (적절한 메서드 사용)
             await send_method(embed=embed, view=view, ephemeral=True)
             logger.info("알림설정 UI 전송 완료")
@@ -802,6 +796,69 @@ class AlertCog(commands.Cog):
         
         # 알림 설정 UI 표시
         await self.show_alert_settings(interaction)
+
+    async def show_custom_alerts(self, interaction: discord.Interaction):
+        """커스텀 알림 관리 UI를 표시"""
+        logger.info(f"커스텀 알림 보기 UI 표시: 사용자 {interaction.user.id}")
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+
+            # 사용자의 커스텀 알림 가져오기
+            with SessionLocal() as db:
+                user_alerts = get_user_alerts(db, interaction.user.id)
+                custom_alerts = [a for a in user_alerts if a['alert_type'] == 'custom' or a['alert_type'].startswith('custom_')]
+
+            # 임베드 생성
+            embed = discord.Embed(
+                title="➕ 커스텀 알림 관리",
+                description=f"등록된 커스텀 알림: {len(custom_alerts)}/25개\n\n아래 버튼을 눌러 알림을 삭제할 수 있습니다.",
+                color=discord.Color.green()
+            )
+
+            if custom_alerts:
+                # 커스텀 알림 목록 표시
+                custom_list = []
+                for i, alert in enumerate(custom_alerts, 1):
+                    time_str = alert['alert_time'].strftime('%H:%M')
+                    if alert['alert_type'].startswith('custom_'):
+                        day_code = alert['alert_type'][7:]
+                        day_name = ALERT_TYPE_NAMES.get(day_code, day_code)
+                        custom_list.append(f"{i}. {time_str} (매주 {day_name})")
+                    else:
+                        interval_display = "매일" if alert['interval'] == "day" else "매주"
+                        custom_list.append(f"{i}. {time_str} ({interval_display})")
+
+                embed.add_field(
+                    name="📋 알림 목록",
+                    value="\n".join(custom_list[:25]),  # 최대 25개까지
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name="알림 없음",
+                    value="'알림등록' 버튼에서 커스텀 알림을 추가할 수 있습니다.",
+                    inline=False
+                )
+
+            # 커스텀 알림 관리 뷰 생성
+            view = CustomAlertManageView(custom_alerts)
+
+            # 메시지 전송
+            if interaction.response.is_done():
+                await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+            else:
+                await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+            logger.info("커스텀 알림 보기 UI 전송 완료")
+
+        except Exception as e:
+            logger.error(f"커스텀 알림 보기 UI 표시 중 오류: {str(e)}")
+            logger.error(traceback.format_exc())
+            if not interaction.response.is_done():
+                await interaction_response(interaction, "커스텀 알림 조회 중 오류가 발생했습니다.", ephemeral=True)
+            else:
+                await interaction_followup(interaction, "커스텀 알림 조회 중 오류가 발생했습니다.")
 
     # @tasks.loop(minutes=1)
     # async def check_alerts(self):
