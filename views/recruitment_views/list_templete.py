@@ -473,10 +473,19 @@ class RecruitmentListButtonView(discord.ui.View):
     #             버튼 제거
     # ───────────────────────────────────────────────
     def remove_all_buttons(self, status_code: int):
-    # 모집중이 아닐시 View에서 모든 버튼을 제거합니다. 
+    # 모집중이 아닐시 View에서 모든 버튼을 제거합니다.
         if status_code != 2:
             for item in list(self.children):
                 if isinstance(item, discord.ui.Button):
                     self.remove_item(item)
+
+    # ───────────────────────────────────────────────
+    #             버튼 비활성화
+    # ───────────────────────────────────────────────
+    def disable_all_buttons(self):
+        """모든 버튼을 비활성화합니다."""
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
 
 

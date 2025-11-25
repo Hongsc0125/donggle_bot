@@ -4,6 +4,7 @@ from typing import List, Tuple
 from discord.ext import commands
 from discord import app_commands
 import logging
+from datetime import datetime, timedelta
 
 from db.session import SessionLocal
 from core.utils import interaction_response, interaction_followup
@@ -172,23 +173,52 @@ class RecruitmentCog(commands.Cog):
         for recruitment in recruitments:
             recru_id = recruitment['recru_id']
             message_id = recruitment['list_message_id']
-            
+
             if not message_id:
                 logger.warning(f"공고 {recru_id}의 메시지 ID가 없습니다.")
                 continue
-            
+
             keep_message_ids.add(int(message_id))
-            
+
+            # 일주일 경과 여부 확인
+            create_dt = recruitment['create_dt']
+            is_expired = False
+            if create_dt:
+                # create_dt가 문자열인 경우 datetime으로 변환
+                if isinstance(create_dt, str):
+                    create_dt = datetime.fromisoformat(create_dt)
+
+                # 현재 시간과 비교 (일주일 = 7일)
+                time_diff = datetime.now() - create_dt
+                is_expired = time_diff > timedelta(days=7)
+
+            # 일주일이 지난 경우 버튼만 비활성화하고 업데이트 생략
+            if is_expired:
+                logger.info(f"공고 {recru_id}는 일주일이 지나 버튼만 비활성화합니다.")
+                try:
+                    message = await channel.fetch_message(int(message_id))
+                    # 기존 임베드 유지, 버튼만 비활성화
+                    view = RecruitmentListButtonView(recru_id=recru_id)
+                    view.disable_all_buttons()
+                    await message.edit(view=view)
+                    logger.info(f"공고 {recru_id} 버튼 비활성화 완료")
+                except discord.NotFound:
+                    logger.warning(f"메시지 {message_id}를 찾을 수 없습니다.")
+                except Exception as e:
+                    logger.error(f"공고 {recru_id} 버튼 비활성화 중 오류: {str(e)}")
+                continue
+
+            # 일주일 이내인 경우만 정상 업데이트
             # 참가자 목록 조회
             participants = select_participants(db, recru_id)
-            
+
             # 닉네임 정보 수집
             recruiter_name, applicant_names = await get_member_names(
-                channel.guild, 
-                recruitment['create_user_id'], 
+                channel.guild,
+                recruitment['create_user_id'],
                 participants
             )
-            
+
             # 이미지 URL 설정
             if recruitment['dungeon_type'] in ['심층', '퀘스트']:
                 image_url = f"https://harmari.duckdns.org/static/{recruitment['dungeon_type']}.png"
@@ -196,7 +226,7 @@ class RecruitmentCog(commands.Cog):
                 image_url = f"https://harmari.duckdns.org/static/{recruitment['dungeon_name']}.png"
             else:
                 image_url = "https://harmari.duckdns.org/static/마비로고.png"
-            
+
             # 공고 임베드 생성
             embed = build_recruitment_embed(
                 dungeon_type=recruitment['dungeon_type'],
@@ -213,7 +243,7 @@ class RecruitmentCog(commands.Cog):
                 recruiter_name=recruiter_name,
                 applicant_names=applicant_names
             )
-            
+
             # 버튼 뷰 생성 - 상태에 따라 버튼 표시 여부 결정
             view = None
             if recruitment['status_code'] == 2:  # 모집중인 경우만 버튼 포함
@@ -222,7 +252,7 @@ class RecruitmentCog(commands.Cog):
                 # 모집 완료/취소 상태일 때는 버튼 없는 뷰로 설정
                 view = RecruitmentListButtonView(recru_id=recru_id)
                 view.remove_all_buttons(recruitment['status_code'])
-            
+
             # 메시지 찾아서 업데이트
             try:
                 message = await channel.fetch_message(int(message_id))
