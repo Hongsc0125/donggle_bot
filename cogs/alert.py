@@ -738,6 +738,10 @@ class AlertCog(commands.Cog):
             # 기본 알림 선택용 뷰 생성
             view = AlertView(interaction.user.id, self.bot)
             
+            # 현재 view의 row별 아이템 개수 확인
+            row_3_count = sum(1 for item in view.children if hasattr(item, 'row') and item.row == 3)
+            row_4_count = sum(1 for item in view.children if hasattr(item, 'row') and item.row == 4)
+
             # 커스텀 알림 삭제 버튼 추가
             for i, alert in enumerate(custom_alerts):
                 delete_btn = CustomAlertDeleteButton(alert['alert_id'])
@@ -751,7 +755,19 @@ class AlertCog(commands.Cog):
                     time_display = f"{alert['alert_time'].strftime('%H:%M')} ({interval_display})"
 
                 delete_btn.label = f"삭제: {time_display}"
-                delete_btn.row = 5 + (i // 5)  # row 5부터 시작, 한 줄에 다섯 개씩 배치
+
+                # row 3과 4의 남은 공간에 배치 (Discord는 row 0-4만 허용, 각 row 최대 5개)
+                if row_3_count < 5:
+                    delete_btn.row = 3
+                    row_3_count += 1
+                elif row_4_count < 5:
+                    delete_btn.row = 4
+                    row_4_count += 1
+                else:
+                    # 더 이상 공간 없음 - UI 제약으로 표시 불가
+                    logger.warning(f"커스텀 알림 삭제 버튼 표시 공간 부족: {i}번째부터 생략됨")
+                    break
+
                 view.add_item(delete_btn)
             
             # 메시지 전송 (적절한 메서드 사용)
