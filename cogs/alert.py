@@ -614,27 +614,28 @@ class AlertCog(commands.Cog):
             "> **알림 설정 명령어** \n" +
             "> `/알림설정`\n\n" +
             "> **사용법**\n" +
-            "> 아래 버튼을 클릭하거나 `/알림설정` 명령어를 입력해서 알림을 설정하세요.",
+            "> • **알림등록**: 보스/결계/요일/커스텀 알림 설정\n" +
+            "> • **커스텀 알림 보기**: 등록한 커스텀 알림 관리 (최대 25개)",
             color=discord.Color.blue()
         )
 
-        # 기존 버튼이 있는지 확인
+        # 기존 버튼이 있는지 확인 (두 버튼 모두 있어야 함)
         last_message = None
         try:
             async for message in channel.history(limit=5, oldest_first=False):
-                if (
-                    message.author.id == self.bot.user.id and
-                    message.components and
-                    any(
-                        any(
-                            hasattr(child, "custom_id") and child.custom_id == "alert_register"
-                            for child in (component.children if hasattr(component, "children") else [])
-                        )
-                        for component in message.components
-                    )
-                ):
-                    last_message = message
-                    break
+                if message.author.id == self.bot.user.id and message.components:
+                    # 모든 custom_id 수집
+                    custom_ids = set()
+                    for component in message.components:
+                        if hasattr(component, "children"):
+                            for child in component.children:
+                                if hasattr(child, "custom_id") and child.custom_id:
+                                    custom_ids.add(child.custom_id)
+
+                    # "alert_register"와 "custom_alert_view" 두 버튼 모두 있는지 확인
+                    if "alert_register" in custom_ids and "custom_alert_view" in custom_ids:
+                        last_message = message
+                        break
         except Exception as e:
             logger.warning(f"채널 {channel_id} 메시지 조회 실패: {str(e)}")
 
