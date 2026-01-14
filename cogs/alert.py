@@ -620,22 +620,42 @@ class AlertCog(commands.Cog):
         )
 
         # 기존 버튼이 있는지 확인 (두 버튼 모두 있어야 함)
+        # limit을 50으로 늘려서 더 많은 메시지 확인
         last_message = None
+        messages_to_delete = []  # 중복 메시지 삭제용
         try:
-            async for message in channel.history(limit=5, oldest_first=False):
-                if message.author.id == self.bot.user.id and message.components:
-                    # 모든 custom_id 수집
-                    custom_ids = set()
-                    for component in message.components:
-                        if hasattr(component, "children"):
-                            for child in component.children:
-                                if hasattr(child, "custom_id") and child.custom_id:
-                                    custom_ids.add(child.custom_id)
+            async for message in channel.history(limit=50, oldest_first=False):
+                if message.author.id == self.bot.user.id and message.embeds:
+                    # 임베드 제목으로 알림 등록 메시지인지 확인
+                    if message.embeds[0].title == "**알림 등록 버튼을 눌러주세요!**":
+                        if last_message is None:
+                            # 첫 번째로 발견한 메시지 (가장 최근)
+                            # 두 버튼 모두 있는지 확인
+                            custom_ids = set()
+                            for component in message.components:
+                                if hasattr(component, "children"):
+                                    for child in component.children:
+                                        if hasattr(child, "custom_id") and child.custom_id:
+                                            custom_ids.add(child.custom_id)
 
-                    # "alert_register"와 "custom_alert_view" 두 버튼 모두 있는지 확인
-                    if "alert_register" in custom_ids and "custom_alert_view" in custom_ids:
-                        last_message = message
-                        break
+                            # 두 버튼 모두 있으면 유지, 아니면 업데이트 대상
+                            if "alert_register" in custom_ids and "custom_alert_view" in custom_ids:
+                                last_message = message
+                            else:
+                                # 버튼이 부족하면 삭제하고 새로 생성
+                                messages_to_delete.append(message)
+                        else:
+                            # 이미 유지할 메시지를 찾았으므로 나머지는 중복 메시지
+                            messages_to_delete.append(message)
+
+            # 중복 메시지 삭제
+            for msg in messages_to_delete:
+                try:
+                    await msg.delete()
+                    logger.info(f"알림 채널 {channel_id} 중복 메시지 삭제: {msg.id}")
+                except Exception as e:
+                    logger.warning(f"메시지 {msg.id} 삭제 실패: {e}")
+
         except Exception as e:
             logger.warning(f"채널 {channel_id} 메시지 조회 실패: {str(e)}")
 
